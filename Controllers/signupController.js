@@ -17,7 +17,7 @@ const signup = (req, res) => {
     }
 
     // Save the user with the hashed password
-    const query = `INSERT INTO users (first_name, last_name, email, password) VALUES (?, ?, ?, ?)`;
+    const query = `INSERT INTO tbl_users (first_name, last_name, email, password) VALUES (?, ?, ?, ?)`;
 
     db.query(query, [firstName, lastName, email, hashedPassword], (err, result) => {
       if (err) {
