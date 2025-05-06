@@ -4,8 +4,9 @@ const cropsController = require("../Controllers/cropsController");
 
 router.post("/", cropsController.createCrop);
 router.get("/", cropsController.getCrops); 
-router.get("/:id", cropsController.getCropById); 
-router.get("/polygons", cropsController.getAllPolygons);
+router.get("/polygons", cropsController.getAllPolygons); // move this ABOVE `/:id`
+router.get("/:id", cropsController.getCropById);
+
 
 
 module.exports = router;

@@ -58,6 +58,29 @@ exports.createCrop = (req, res) => {
   });
 };
 
+exports.getAllPolygons = async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT coordinates FROM crops WHERE coordinates IS NOT NULL");
+
+    const geojson = {
+      type: "FeatureCollection",
+      features: rows.map((row) => ({
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: JSON.parse(row.coordinates),
+        },
+        properties: {},
+      })),
+    };
+
+    res.json(geojson);
+  } catch (err) {
+    console.error("❌ Failed to get polygons:", err);
+    res.status(500).json({ message: "Error retrieving crop polygons" });
+  }
+};
+
 
 
 
