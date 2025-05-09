@@ -1,35 +1,43 @@
 const db = require("../Config/db");
+const path = require("path");
+const fs = require("fs");
 
 exports.createCrop = (req, res) => {
   const {
-    coordinates,
     crop,
     variety,
     plantedDate,
     estimatedHarvest,
     estimatedVolume,
     estimatedHectares,
-    note
+    note,
+    coordinates
   } = req.body;
 
-  let lng, lat;
+  let parsedCoords = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
+  let [lng, lat] = Array.isArray(parsedCoords[0]) ? parsedCoords[0] : parsedCoords;
+  const polygonString = JSON.stringify(parsedCoords);
 
-  if (Array.isArray(coordinates[0])) {
-    // If it's a polygon: use the first point
-    [lng, lat] = coordinates[0];
-  } else {
-    // If it's a point: just use directly
-    [lng, lat] = coordinates;
-  }
+  // 📸 Handle multiple image uploads
+  const photoFiles = req.files?.photos;
+  const uploadDir = path.join(__dirname, "../uploads/crops");
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-  const polygonString = JSON.stringify(coordinates); // stringify the polygon
+  const photoPaths = [];
+  const files = Array.isArray(photoFiles) ? photoFiles : [photoFiles];
+  files.forEach(file => {
+    const filename = `${Date.now()}_${file.name}`;
+    const filePath = path.join(uploadDir, filename);
+    file.mv(filePath);
+    photoPaths.push(`/uploads/crops/${filename}`);
+  });
 
   const sql = `
     INSERT INTO tbl_crops (
       crop, variety, planted_date, estimated_harvest,
       estimated_volume, estimated_hectares, note,
-      latitude, longitude, coordinates
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      latitude, longitude, coordinates, photos
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const values = [
@@ -42,19 +50,16 @@ exports.createCrop = (req, res) => {
     note,
     lat,
     lng,
-    polygonString
+    polygonString,
+    JSON.stringify(photoPaths)
   ];
 
   db.query(sql, values, (err, result) => {
     if (err) {
-      console.error(" Insert error:", err.message);
-      return res.status(500).json({ message: "Server error", error: err.message });
+      console.error("Insert error:", err);
+      return res.status(500).json({ message: "Server error" });
     }
-
-    res.status(201).json({
-      message: "Crop tagged successfully",
-      cropId: result.insertId
-    });
+    res.status(201).json({ message: "Crop saved successfully" });
   });
 };
 

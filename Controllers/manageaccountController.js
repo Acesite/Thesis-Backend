@@ -33,7 +33,7 @@ const updateAccountStatus = (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  const sql = "UPDATE tbl_users SET status = ? WHERE id = ?";
+  const sql = "UPDATE tbl_users SET status = ? WHERE id = ?"; 
   db.query(sql, [status, id], (err, result) => {
     if (err) {
       console.error("Error updating account status:", err);
