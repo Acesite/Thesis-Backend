@@ -11,8 +11,10 @@ exports.createCrop = (req, res) => {
     estimatedVolume,
     estimatedHectares,
     note,
-    coordinates
+    coordinates,
+    barangay // ✅ added here
   } = req.body;
+  
 
   let parsedCoords = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
   let [lng, lat] = Array.isArray(parsedCoords[0]) ? parsedCoords[0] : parsedCoords;
@@ -33,26 +35,29 @@ exports.createCrop = (req, res) => {
   });
 
   const sql = `
-    INSERT INTO tbl_crops (
-      crop, variety, planted_date, estimated_harvest,
-      estimated_volume, estimated_hectares, note,
-      latitude, longitude, coordinates, photos
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `;
+  INSERT INTO tbl_crops (
+    crop, variety, planted_date, estimated_harvest,
+    estimated_volume, estimated_hectares, note,
+    latitude, longitude, coordinates, photos, barangay
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
 
-  const values = [
-    crop,
-    variety,
-    plantedDate,
-    estimatedHarvest,
-    estimatedVolume,
-    estimatedHectares,
-    note,
-    lat,
-    lng,
-    polygonString,
-    JSON.stringify(photoPaths)
-  ];
+
+const values = [
+  crop,
+  variety,
+  plantedDate,
+  estimatedHarvest,
+  estimatedVolume,
+  estimatedHectares,
+  note,
+  lat,
+  lng,
+  polygonString,
+  JSON.stringify(photoPaths),
+  barangay // ✅ added here
+];
+
 
   db.query(sql, values, (err, result) => {
     if (err) {
