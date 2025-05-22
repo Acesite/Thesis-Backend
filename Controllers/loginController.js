@@ -49,7 +49,14 @@ const login = (req, res) => {
               { expiresIn: '1h' }
           );
 
-          res.status(200).json({ success: true, token, role: user.role });
+          res.status(200).json({ 
+  success: true, 
+  token, 
+  role: user.role,
+  first_name: user.first_name,
+  last_name: user.last_name
+});
+
       });
   });
 };
