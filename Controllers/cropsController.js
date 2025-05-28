@@ -12,7 +12,8 @@ exports.createCrop = (req, res) => {
     estimatedHectares,
     note,
     coordinates,
-    barangay // ✅ added here
+    barangay, 
+    admin_id
   } = req.body;
   
 
@@ -38,9 +39,10 @@ exports.createCrop = (req, res) => {
   INSERT INTO tbl_crops (
     crop, variety, planted_date, estimated_harvest,
     estimated_volume, estimated_hectares, note,
-    latitude, longitude, coordinates, photos, barangay
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    latitude, longitude, coordinates, photos, barangay, admin_id
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
+
 
 
 const values = [
@@ -55,8 +57,10 @@ const values = [
   lng,
   polygonString,
   JSON.stringify(photoPaths),
-  barangay // ✅ added here
+  barangay,
+  admin_id // ✅ Add this as the 13th value
 ];
+
 
 
   db.query(sql, values, (err, result) => {

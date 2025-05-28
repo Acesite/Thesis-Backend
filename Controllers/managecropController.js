@@ -1,16 +1,27 @@
 const db = require("../Config/db");
 
+
 // Get all crops
 exports.getAllCrops = (req, res) => {
-  const sql = "SELECT * FROM tbl_crops ORDER BY id DESC";
+  const sql = `
+    SELECT 
+      tbl_crops.*, 
+      tbl_users.first_name, 
+      tbl_users.last_name 
+    FROM tbl_crops
+    LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
+    ORDER BY tbl_crops.id DESC
+  `;
+  
   db.query(sql, (err, results) => {
     if (err) {
-      console.error(" Error fetching crops:", err);
+      console.error("Error fetching crops:", err);
       return res.status(500).json({ message: "Server error" });
     }
     res.status(200).json(results);
   });
 };
+
 
 // Delete a crop by ID
 exports.deleteCrop = (req, res) => {

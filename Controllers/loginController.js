@@ -23,6 +23,8 @@ const login = (req, res) => {
       }
 
       const user = result[0];
+      console.log("Fetched User:", user);
+
 
       // Check user status
       if (user.status === "Pending") {
@@ -50,13 +52,14 @@ const login = (req, res) => {
           );
 
           res.status(200).json({ 
-  success: true, 
-  token, 
-  role: user.role,
-  first_name: user.first_name,
-  last_name: user.last_name
-});
-
+            success: true, 
+            token, 
+            role: user.role,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            id: user.id // ✅ Add this line
+          });
+          
       });
   });
 };
