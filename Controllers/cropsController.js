@@ -4,7 +4,7 @@ const fs = require("fs");
 
 exports.createCrop = (req, res) => {
   const {
-    crop,
+    crop_type_id,
     variety,
     plantedDate,
     estimatedHarvest,
@@ -15,6 +15,7 @@ exports.createCrop = (req, res) => {
     barangay, 
     admin_id
   } = req.body;
+  
   
 
   let parsedCoords = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
@@ -37,7 +38,7 @@ exports.createCrop = (req, res) => {
 
   const sql = `
   INSERT INTO tbl_crops (
-    crop, variety, planted_date, estimated_harvest,
+    crop_type_id, variety, planted_date, estimated_harvest,
     estimated_volume, estimated_hectares, note,
     latitude, longitude, coordinates, photos, barangay, admin_id
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -45,8 +46,9 @@ exports.createCrop = (req, res) => {
 
 
 
+
 const values = [
-  crop,
+  crop_type_id,  // ✅ now passing the ID
   variety,
   plantedDate,
   estimatedHarvest,
@@ -58,7 +60,7 @@ const values = [
   polygonString,
   JSON.stringify(photoPaths),
   barangay,
-  admin_id // ✅ Add this as the 13th value
+  admin_id
 ];
 
 
@@ -101,7 +103,13 @@ exports.getAllPolygons = async (req, res) => {
 
 //  Optional: Get all crops
 exports.getCrops = (req, res) => {
-  db.query("SELECT * FROM tbl_crops", (err, results) => {
+  const sql = `
+    SELECT crops.*, crop_types.name AS crop_name 
+    FROM tbl_crops AS crops 
+    JOIN tbl_crop_types AS crop_types ON crops.crop_type_id = crop_types.id
+  `;
+
+  db.query(sql, (err, results) => {
     if (err) {
       console.error("Fetch error:", err.message);
       return res.status(500).json({ error: "Database error" });
@@ -109,6 +117,7 @@ exports.getCrops = (req, res) => {
     res.status(200).json(results);
   });
 };
+
 
 // ✅ Optional: Get crop by ID
 exports.getCropById = (req, res) => {
@@ -158,3 +167,15 @@ exports.getAllPolygons = (req, res) => {
       res.json(geojson);
     });
   };
+
+  exports.getCropTypes = (req, res) => {
+    const sql = "SELECT * FROM tbl_crop_types";
+    db.query(sql, (err, results) => {
+      if (err) {
+        console.error("Failed to fetch crop types:", err);
+        return res.status(500).json({ message: "Server error" });
+      }
+      res.status(200).json(results);
+    });
+  };
+  
