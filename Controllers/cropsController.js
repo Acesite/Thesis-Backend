@@ -136,37 +136,45 @@ exports.getCropById = (req, res) => {
 
 
 exports.getAllPolygons = (req, res) => {
-    const sql = "SELECT * FROM tbl_crops";
-    db.query(sql, (err, results) => {
-      if (err) {
-        console.error("❌ Fetch polygons error:", err);
-        return res.status(500).json({ error: "Database error" });
-      }
-  
-      const geojson = {
-        type: "FeatureCollection",
-        features: results.map(row => ({
-          type: "Feature",
-          geometry: {
-            type: "Polygon",
-            coordinates: [JSON.parse(row.coordinates)] // Make sure you store polygon coordinates as JSON string
-          },
-          properties: {
-            id: row.id,
-            crop: row.crop,
-            variety: row.variety,
-            planted_date: row.planted_date,
-            estimated_harvest: row.estimated_harvest,
-            estimated_volume: row.estimated_volume,
-            estimated_hectares: row.estimated_hectares,
-            note: row.note
-          }
-        }))
-      };
-  
-      res.json(geojson);
-    });
-  };
+  const sql = `
+    SELECT 
+      crops.*, 
+      crop_types.name AS crop_name
+    FROM tbl_crops AS crops
+    JOIN tbl_crop_types AS crop_types ON crops.crop_type_id = crop_types.id
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("❌ Fetch polygons error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    const geojson = {
+      type: "FeatureCollection",
+      features: results.map(row => ({
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [JSON.parse(row.coordinates)],
+        },
+        properties: {
+          id: row.id,
+          crop_name: row.crop_name, // ✅ use crop_name from JOIN
+          variety: row.variety,
+          planted_date: row.planted_date,
+          estimated_harvest: row.estimated_harvest,
+          estimated_volume: row.estimated_volume,
+          estimated_hectares: row.estimated_hectares,
+          note: row.note,
+        }
+      }))
+    };
+
+    res.json(geojson);
+  });
+};
+
 
   exports.getCropTypes = (req, res) => {
     const sql = "SELECT * FROM tbl_crop_types";

@@ -6,9 +6,11 @@ exports.getAllCrops = (req, res) => {
   const sql = `
     SELECT 
       tbl_crops.*, 
+      tbl_crop_types.name AS crop_name,  -- ✅ join crop type name
       tbl_users.first_name, 
       tbl_users.last_name 
     FROM tbl_crops
+    LEFT JOIN tbl_crop_types ON tbl_crops.crop_type_id = tbl_crop_types.id
     LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
     ORDER BY tbl_crops.id DESC
   `;
@@ -21,6 +23,7 @@ exports.getAllCrops = (req, res) => {
     res.status(200).json(results);
   });
 };
+
 
 
 // Delete a crop by ID
@@ -42,31 +45,31 @@ exports.deleteCrop = (req, res) => {
 
 // managecropController.js
 exports.updateCrop = (req, res) => {
-    const { id } = req.params;
-    const {
-      crop,
-      variety,
-      planted_date,
-      estimated_harvest,
-      estimated_volume,
-      estimated_hectares,
-      note
-    } = req.body;
-  
-    const sql = `
-      UPDATE tbl_crops 
-      SET crop = ?, variety = ?, planted_date = ?, estimated_harvest = ?, estimated_volume = ?, estimated_hectares = ?, note = ?
-      WHERE id = ?
-    `;
-  
-    const values = [crop, variety, planted_date, estimated_harvest, estimated_volume, estimated_hectares, note, id];
-  
-    db.query(sql, values, (err, result) => {
-      if (err) {
-        console.error("Error updating crop:", err);
-        return res.status(500).json({ message: "Server error" });
-      }
-      res.status(200).json({ message: "Crop updated successfully" });
-    });
-  };
-  
+  const { id } = req.params;
+  const {
+    crop_type_id,
+    variety,
+    planted_date,
+    estimated_harvest,
+    estimated_volume,
+    estimated_hectares,
+    note
+  } = req.body;
+
+  const sql = `
+    UPDATE tbl_crops 
+    SET crop_type_id = ?, variety = ?, planted_date = ?, estimated_harvest = ?, estimated_volume = ?, estimated_hectares = ?, note = ?
+    WHERE id = ?
+  `;
+
+  const values = [crop_type_id, variety, planted_date, estimated_harvest, estimated_volume, estimated_hectares, note, id];
+
+  db.query(sql, values, (err, result) => {
+    if (err) {
+      console.error("Error updating crop:", err);
+      return res.status(500).json({ message: "Server error" });
+    }
+    res.status(200).json({ message: "Crop updated successfully" });
+  });
+};
+
