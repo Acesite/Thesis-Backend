@@ -6,50 +6,54 @@ exports.createCrop = (req, res) => {
   const {
     crop_type_id,
     variety,
+    variety_id, 
     plantedDate,
     estimatedHarvest,
     estimatedVolume,
     estimatedHectares,
     note,
     coordinates,
-    barangay, 
+    barangay,
     admin_id
   } = req.body;
-  
   
 
   let parsedCoords = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
   let [lng, lat] = Array.isArray(parsedCoords[0]) ? parsedCoords[0] : parsedCoords;
   const polygonString = JSON.stringify(parsedCoords);
 
-  // 📸 Handle multiple image uploads
-  const photoFiles = req.files?.photos;
-  const uploadDir = path.join(__dirname, "../uploads/crops");
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+  
+ // Handle multiple image uploads
+const photoFiles = req.files?.photos;
+const photoPaths = [];
 
-  const photoPaths = [];
+const uploadDir = path.join(__dirname, "../uploads/crops");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+// ✅ Proceed only if photos were uploaded
+if (photoFiles) {
   const files = Array.isArray(photoFiles) ? photoFiles : [photoFiles];
+
   files.forEach(file => {
     const filename = `${Date.now()}_${file.name}`;
     const filePath = path.join(uploadDir, filename);
-    file.mv(filePath);
+    file.mv(filePath); // ✅ Save the file
     photoPaths.push(`/uploads/crops/${filename}`);
   });
+}
 
-  const sql = `
+// Save to DB using either the uploaded paths or an empty array
+const sql = `
   INSERT INTO tbl_crops (
-    crop_type_id, variety, planted_date, estimated_harvest,
+    crop_type_id, variety_id, planted_date, estimated_harvest,
     estimated_volume, estimated_hectares, note,
-    latitude, longitude, coordinates, photos, barangay, admin_id
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    latitude, longitude, coordinates, photos, barangay, admin_id, created_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 `;
 
-
-
-
 const values = [
-  crop_type_id,  // ✅ now passing the ID
-  variety,
+  crop_type_id,
+  variety_id || null,
   plantedDate,
   estimatedHarvest,
   estimatedVolume,
@@ -58,7 +62,7 @@ const values = [
   lat,
   lng,
   polygonString,
-  JSON.stringify(photoPaths),
+  JSON.stringify(photoPaths), 
   barangay,
   admin_id
 ];
@@ -97,16 +101,15 @@ exports.getAllPolygons = async (req, res) => {
   }
 };
 
-
-
-
-
-//  Optional: Get all crops
 exports.getCrops = (req, res) => {
   const sql = `
-    SELECT crops.*, crop_types.name AS crop_name 
-    FROM tbl_crops AS crops 
-    JOIN tbl_crop_types AS crop_types ON crops.crop_type_id = crop_types.id
+  SELECT crops.*, 
+  crop_types.name AS crop_name,
+  crop_varieties.name AS variety_name
+FROM tbl_crops AS crops
+JOIN tbl_crop_types AS crop_types ON crops.crop_type_id = crop_types.id
+LEFT JOIN tbl_crop_varieties AS crop_varieties ON crops.variety_id = crop_varieties.id
+
   `;
 
   db.query(sql, (err, results) => {
@@ -119,7 +122,7 @@ exports.getCrops = (req, res) => {
 };
 
 
-// ✅ Optional: Get crop by ID
+
 exports.getCropById = (req, res) => {
   const { id } = req.params;
   db.query("SELECT * FROM tbl_crops WHERE id = ?", [id], (err, results) => {
@@ -181,6 +184,19 @@ exports.getAllPolygons = (req, res) => {
     db.query(sql, (err, results) => {
       if (err) {
         console.error("Failed to fetch crop types:", err);
+        return res.status(500).json({ message: "Server error" });
+      }
+      res.status(200).json(results);
+    });
+  };
+  
+
+  exports.getCropVarietiesByType = (req, res) => {
+    const { crop_type_id } = req.params;
+    const sql = "SELECT id, name FROM tbl_crop_varieties WHERE crop_type_id = ?";
+    db.query(sql, [crop_type_id], (err, results) => {
+      if (err) {
+        console.error("Failed to fetch crop varieties:", err);
         return res.status(500).json({ message: "Server error" });
       }
       res.status(200).json(results);

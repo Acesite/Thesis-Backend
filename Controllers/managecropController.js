@@ -4,15 +4,18 @@ const db = require("../Config/db");
 // Get all crops
 exports.getAllCrops = (req, res) => {
   const sql = `
-    SELECT 
-      tbl_crops.*, 
-      tbl_crop_types.name AS crop_name,  -- ✅ join crop type name
-      tbl_users.first_name, 
-      tbl_users.last_name 
-    FROM tbl_crops
-    LEFT JOIN tbl_crop_types ON tbl_crops.crop_type_id = tbl_crop_types.id
-    LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
-    ORDER BY tbl_crops.id DESC
+  SELECT 
+  tbl_crops.*, 
+  tbl_crop_types.name AS crop_name,
+  tbl_crop_varieties.name AS variety_name, -- ✅ Add variety name
+  tbl_users.first_name, 
+  tbl_users.last_name 
+FROM tbl_crops
+LEFT JOIN tbl_crop_types ON tbl_crops.crop_type_id = tbl_crop_types.id
+LEFT JOIN tbl_crop_varieties ON tbl_crops.variety_id = tbl_crop_varieties.id -- ✅ Join to get name
+LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
+ORDER BY tbl_crops.id DESC
+
   `;
   
   db.query(sql, (err, results) => {
@@ -48,22 +51,21 @@ exports.updateCrop = (req, res) => {
   const { id } = req.params;
   const {
     crop_type_id,
-    variety,
+    variety_id, // ✅ get the ID
     planted_date,
     estimated_harvest,
     estimated_volume,
     estimated_hectares,
     note
   } = req.body;
-
+  
   const sql = `
     UPDATE tbl_crops 
-    SET crop_type_id = ?, variety = ?, planted_date = ?, estimated_harvest = ?, estimated_volume = ?, estimated_hectares = ?, note = ?
+    SET crop_type_id = ?, variety_id = ?, planted_date = ?, estimated_harvest = ?, estimated_volume = ?, estimated_hectares = ?, note = ?
     WHERE id = ?
   `;
-
-  const values = [crop_type_id, variety, planted_date, estimated_harvest, estimated_volume, estimated_hectares, note, id];
-
+  const values = [crop_type_id, variety_id, planted_date, estimated_harvest, estimated_volume, estimated_hectares, note, id];
+  
   db.query(sql, values, (err, result) => {
     if (err) {
       console.error("Error updating crop:", err);
