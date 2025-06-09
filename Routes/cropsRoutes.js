@@ -7,6 +7,7 @@ router.get("/types", cropsController.getCropTypes);
 router.get("/polygons", cropsController.getAllPolygons);
 router.get("/", cropsController.getCrops);
 router.get("/:id", cropsController.getCropById); 
+router.get("/varieties/:crop_type_id", cropsController.getCropVarietiesByType);
 
 
 
