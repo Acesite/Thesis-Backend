@@ -6,6 +6,8 @@ const manageAccountRoutes = require("./Routes/manageaccountRoutes");
 const cropsRoutes = require("./Routes/cropsRoutes");
 const manageCropRoutes = require("./Routes/managecropRoutes");
 const manageProfileRoutes = require("./Routes/manageprofileRoutes");
+const graphRoutes = require("./Routes/graphRoutes");
+
 require('dotenv').config();
 
 const app = express();
@@ -24,9 +26,8 @@ app.use("/users", loginRoutes); // Routes for Logging in
 app.use("/manageaccount", manageAccountRoutes);  // Routes for Managing Account
 app.use("/api/crops", cropsRoutes);
 app.use("/api/managecrops", manageCropRoutes);
-app.use("/api", manageProfileRoutes); 
-
-
+app.use("/api", manageProfileRoutes);
+app.use("/api/graphs", graphRoutes); 
 
 
 app.listen(PORT, () => {
