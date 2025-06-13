@@ -46,4 +46,8 @@ const updateAccountStatus = (req, res) => {
   });
 };
 
-module.exports = { getAllAccounts, deleteAccount, updateAccountStatus };
+
+module.exports = { getAllAccounts, deleteAccount, updateAccountStatus,};
+
+
+

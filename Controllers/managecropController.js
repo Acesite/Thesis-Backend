@@ -10,11 +10,11 @@ exports.getAllCrops = (req, res) => {
   tbl_crop_varieties.name AS variety_name, -- ✅ Add variety name
   tbl_users.first_name, 
   tbl_users.last_name 
-FROM tbl_crops
-LEFT JOIN tbl_crop_types ON tbl_crops.crop_type_id = tbl_crop_types.id
-LEFT JOIN tbl_crop_varieties ON tbl_crops.variety_id = tbl_crop_varieties.id -- ✅ Join to get name
-LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
-ORDER BY tbl_crops.id DESC
+  FROM tbl_crops
+  LEFT JOIN tbl_crop_types ON tbl_crops.crop_type_id = tbl_crop_types.id
+  LEFT JOIN tbl_crop_varieties ON tbl_crops.variety_id = tbl_crop_varieties.id -- ✅ Join to get name
+  LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
+  ORDER BY tbl_crops.id DESC
 
   `;
   
