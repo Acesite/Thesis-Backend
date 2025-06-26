@@ -57,8 +57,10 @@ const login = (req, res) => {
             role: user.role,
             first_name: user.first_name,
             last_name: user.last_name,
-            id: user.id // ✅ Add this line
+            profile_picture: user.profile_picture, // ✅ include profile picture
+            id: user.id
           });
+          
           
       });
   });
