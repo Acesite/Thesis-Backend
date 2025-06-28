@@ -7,6 +7,7 @@ const cropsRoutes = require("./Routes/cropsRoutes");
 const manageCropRoutes = require("./Routes/managecropRoutes");
 const manageProfileRoutes = require("./Routes/manageprofileRoutes");
 const graphRoutes = require("./Routes/graphRoutes");
+const farmersProfileRoutes = require("./Routes/FarmersProfileRoutes");
 
 require('dotenv').config();
 
@@ -28,7 +29,7 @@ app.use("/api/crops", cropsRoutes);
 app.use("/api/managecrops", manageCropRoutes);
 app.use("/api", manageProfileRoutes);
 app.use("/api/graphs", graphRoutes); 
-
+app.use("/api/farmers", farmersProfileRoutes);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
