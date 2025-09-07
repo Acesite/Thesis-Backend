@@ -33,7 +33,7 @@ const loginFarmer = (req, res) => {
     }
 
     // Compare password
-    bcrypt.compare(password, farmer.password, (err, isMatch) => {
+    bcrypt.compare(password, farmer.password, (err, isMatch) => { 
       if (err) {
         console.error("Error comparing passwords:", err);
         return res.status(500).json({ message: "Internal Server Error" });
