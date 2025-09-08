@@ -1,5 +1,5 @@
 const bcrypt = require("bcrypt");
-const db = require("../Config/db");
+const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
 

@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const db = require('../Config/db'); // Database connection
+const db = require('../../Config/db'); // Database connection
 
 const login = (req, res) => {
   const { email, password } = req.body;

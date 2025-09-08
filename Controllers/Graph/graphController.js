@@ -1,5 +1,5 @@
 // controllers/graphController.js
-const db = require("../Config/db");
+const db = require("../../Config/db");
 
 const getCropTypeCounts = (req, res) => {
   const { barangay } = req.query;

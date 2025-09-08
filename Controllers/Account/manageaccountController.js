@@ -1,4 +1,4 @@
-const db = require("../Config/db");
+const db = require("../../Config/db");
 
 // Fetch all user accounts
 const getAllAccounts = (req, res) => {

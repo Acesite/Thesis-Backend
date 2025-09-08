@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const db = require('../Config/db'); // adjust if path differs
+const db = require('../../Config/db'); // adjust if path differs
 
 const loginFarmer = (req, res) => {
   const { mobile_number, password } = req.body;

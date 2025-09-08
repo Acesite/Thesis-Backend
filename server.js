@@ -1,14 +1,14 @@
 const express = require("express");
 const cors = require("cors");
-const userRoutes = require("./Routes/signupRoutes");
-const loginRoutes = require("./Routes/loginRoutes");
-const manageAccountRoutes = require("./Routes/manageaccountRoutes");
-const cropsRoutes = require("./Routes/cropsRoutes");
-const manageCropRoutes = require("./Routes/managecropRoutes");
-const manageProfileRoutes = require("./Routes/manageprofileRoutes");
-const graphRoutes = require("./Routes/graphRoutes");
-const farmersProfileRoutes = require("./Routes/FarmersProfileRoutes");
-const farmerLoginRoutes = require('./Routes/loginFarmerRoutes');
+const userRoutes = require("./Routes/Signup/signupRoutes");
+const loginRoutes = require("./Routes/Login/loginRoutes");
+const manageAccountRoutes = require("./Routes/Account/manageaccountRoutes");
+const cropsRoutes = require("./Routes/Crops/cropsRoutes");
+const manageCropRoutes = require("./Routes/Crops/managecropRoutes");
+const manageProfileRoutes = require("./Routes/Account/manageprofileRoutes");
+const graphRoutes = require("./Routes/Graph/graphRoutes");
+const farmersProfileRoutes = require("./Routes/Farmers/FarmersProfileRoutes");
+const farmerLoginRoutes = require('./Routes/Login/loginFarmerRoutes');
 require('dotenv').config();
 
 const app = express();

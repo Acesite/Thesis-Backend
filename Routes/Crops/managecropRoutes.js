@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const controller = require("../Controllers/managecropController");
+const controller = require("../../Controllers/Crops/managecropController");
 
 // GET all crops
 router.get("/", controller.getAllCrops);

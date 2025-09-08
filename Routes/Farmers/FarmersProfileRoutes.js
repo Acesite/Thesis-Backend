@@ -1,7 +1,7 @@
 // Add this to the top with other imports
 const express = require('express');
 const router = express.Router();
-const farmersController = require('../Controllers/FarmersProfileController');
+const farmersController = require('../../Controllers/Farmers/FarmersProfileController');
 
 // ✅ Add farmer registration
 router.post('/signup-farmer', farmersController.registerFarmer);

@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getAllAccounts, deleteAccount, updateAccountStatus } = require("../Controllers/manageaccountController");
+const { getAllAccounts, deleteAccount, updateAccountStatus } = require("../../Controllers/Account/manageaccountController");
 
 // Fetch all accounts
 router.get("/accounts", getAllAccounts);

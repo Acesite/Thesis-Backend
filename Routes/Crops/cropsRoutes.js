@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const cropsController = require("../Controllers/cropsController");
+const cropsController = require("../../Controllers/Crops/cropsController");
 
 router.post("/", cropsController.createCrop);
 router.get("/types", cropsController.getCropTypes); 
