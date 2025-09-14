@@ -43,22 +43,23 @@ const loginFarmer = (req, res) => {
         return res.status(401).json({ message: "Invalid mobile number or password" });
       }
 
-      // Farmer authenticated successfully
+     // Farmer authenticated successfully
       const token = jwt.sign(
-        { userId: farmer.id, role: farmer.role },
+        { userId: farmer.farmer_id, role: farmer.role },
         process.env.JWT_SECRET,
         { expiresIn: '1h' }
       );
 
-      res.status(200).json({
-        success: true,
-        token,
-        role: farmer.role,
-        first_name: farmer.first_name,
-        last_name: farmer.last_name,
-        profile_picture: farmer.profile_picture,
-        id: farmer.id
-      });
+     res.status(200).json({
+  success: true,
+  token,
+  role: farmer.role || "farmer",
+  first_name: farmer.first_name,
+  last_name: farmer.last_name,
+  profile_picture: farmer.profile_picture,
+  farmer_id: farmer.farmer_id
+});
+
     });
   });
 };
