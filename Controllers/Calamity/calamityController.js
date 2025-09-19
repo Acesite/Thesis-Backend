@@ -63,70 +63,83 @@ exports.getCalamityTypes = (req, res) => {
   });
 };
 
-
-// Add calamity
 // Add calamity
 exports.addCalamity = async (req, res) => {
   try {
-    const { calamity_type, description, location, coordinates, farmer_id } = req.body;
+    const { calamity_type, description, location, coordinates, admin_id } = req.body;
 
-    // Validate required fields
-    if (!calamity_type || !description || !coordinates || !farmer_id) {
-      return res.status(400).json({ error: "Calamity type, description, coordinates, and farmer_id are required" });
+    if (!calamity_type || !description || !coordinates) {
+      return res.status(400).json({ error: "calamity_type, description, and coordinates are required" });
     }
 
-    // Handle file upload
+    const adminId = Number(admin_id);
+    if (!adminId) {
+      return res.status(400).json({ error: "admin_id is required" });
+    }
+
+    // optional photo
     let photoPath = null;
-    if (req.files && req.files.photo) {
+    if (req.files?.photo) {
       const photoFile = req.files.photo;
       const uploadDir = path.join(__dirname, "../../uploads");
       if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-
       photoPath = `/uploads/${Date.now()}_${photoFile.name}`;
       await photoFile.mv(path.join(__dirname, "../../", photoPath));
     }
 
-    // Parse coordinates safely
-    let polygon;
-    try {
-      polygon = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
-      if (!Array.isArray(polygon) || polygon.length < 3) {
-        return res.status(400).json({ error: "Coordinates must be an array with at least 3 points" });
-      }
-    } catch (err) {
-      return res.status(400).json({ error: "Invalid coordinates format" });
+    // parse coords
+    const polygon = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
+    if (!Array.isArray(polygon) || polygon.length < 3) {
+      return res.status(400).json({ error: "Coordinates must be an array with at least 3 points" });
     }
 
-    const polygonString = JSON.stringify(polygon);
-
-    // Use first coordinate as latitude/longitude
-    const firstPoint = Array.isArray(polygon[0]) ? polygon[0] : polygon;
-    const latitude = firstPoint[1] || 0;
-    const longitude = firstPoint[0] || 0;
-
-    // Ensure location is not empty
+    const [lon, lat] = polygon[0];
+    const latitude = Number(lat) || 0;
+    const longitude = Number(lon) || 0;
     const safeLocation = location || "Unknown";
 
-    // Log for debugging
-    console.log({ calamity_type, description, safeLocation, polygonString, latitude, longitude, farmer_id, photoPath });
-
-    // Insert into DB
-    const query = `
-      INSERT INTO tbl_calamity 
-        (calamity_type, description, photo, location, coordinates, latitude, longitude, farmer_id)
+    const sql = `
+      INSERT INTO tbl_calamity
+        (calamity_type, description, photo, location, coordinates, latitude, longitude, admin_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    db.query(query, [calamity_type, description, photoPath, safeLocation, polygonString, latitude, longitude, farmer_id], (err, result) => {
-      if (err) {
-        console.error("Insert error:", err);
-        return res.status(500).json({ error: "Failed to save calamity: " + err.message });
-      }
-      res.status(201).json({ message: "Calamity added successfully", id: result.insertId });
-    });
+    db.query(
+      sql,
+      [
+        calamity_type,
+        description,
+        photoPath,
+        safeLocation,
+        JSON.stringify(polygon), // store as JSON string
+        latitude,
+        longitude,
+        adminId
+      ],
+      (err, result) => {
+        if (err) {
+          console.error("Insert error:", err);
+          return res.status(500).json({ error: "Failed to save calamity: " + err.message });
+        }
 
+        // ✅ Return the full created object; coordinates as ARRAY for the client
+        return res.status(201).json({
+          id: result.insertId,
+          calamity_type,
+          description,
+          photo: photoPath,
+          location: safeLocation,
+          coordinates: polygon,
+          latitude,
+          longitude,
+          admin_id: adminId,
+        });
+      }
+    );
   } catch (err) {
     console.error("Unexpected error:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+
