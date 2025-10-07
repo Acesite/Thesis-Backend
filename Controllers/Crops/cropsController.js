@@ -2,71 +2,120 @@ const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
 
+// ---------- Helpers ----------
 const toNullableInt = (v) => {
   if (v === undefined || v === null || v === "" || v === "null") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
 
+const toNullableNumber = (v) => {
+  if (v === undefined || v === null || v === "" || v === "null") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const STANDARD_MATURITY_DAYS = {
+  1: 100, // Corn
+  2: 110, // Rice
+  3: 360, // Banana
+  4: 365, // Sugarcane
+  5: 300, // Cassava
+  6: 60,  // Vegetables
+};
+
+function addDaysToISO(dateStr, days) {
+  if (!dateStr || !days) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + Number(days));
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+async function ensureDir(dir) {
+  await fs.promises.mkdir(dir, { recursive: true });
+}
+
+function mvFile(file, destPath) {
+  // express-fileupload supports callback OR promise; ensure promisified
+  return new Promise((resolve, reject) => {
+    file.mv(destPath, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+// ---------- Create Crop ----------
 exports.createCrop = async (req, res) => {
   try {
     const {
       crop_type_id,
       variety_id,
       plantedDate,
-      estimatedHarvest,
+      // estimatedHarvest (optional from client, but we recompute)
       estimatedVolume,
       estimatedHectares,
       note,
       coordinates,
       barangay,
-      admin_id
+      admin_id, // optional; may come from client
     } = req.body;
 
-    // coords -> ring [[lng,lat],...]
+    // Validate minimal fields
+    const ctId = toNullableInt(crop_type_id);
+    if (!ctId) return res.status(400).json({ message: "crop_type_id is required" });
+    if (!plantedDate) return res.status(400).json({ message: "plantedDate is required" });
+
+    // Parse coordinates (expecting a ring: [[lng,lat],...])
     const parsedCoords = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
     if (!Array.isArray(parsedCoords) || !Array.isArray(parsedCoords[0])) {
       return res.status(400).json({ message: "Invalid coordinates format" });
     }
     const [lng, lat] = parsedCoords[0];
+    if (![lng, lat].every((n) => typeof n === "number" && isFinite(n))) {
+      return res.status(400).json({ message: "Invalid coordinate pair" });
+    }
     const polygonString = JSON.stringify(parsedCoords);
 
-    // ---- PHOTOS ----
-    const photoFiles = req.files?.photos;
+    // Compute estimated harvest date on server (source of truth)
+    const maturityDays = STANDARD_MATURITY_DAYS[ctId] || 0;
+    const computedHarvest = addDaysToISO(plantedDate, maturityDays);
+
+    // ---- Photos ----
     const photoPaths = [];
+    const photoFiles = req.files?.photos;
 
     if (photoFiles) {
       const files = Array.isArray(photoFiles) ? photoFiles : [photoFiles];
-
-      // SAVE TO <projectRoot>/uploads/crops  (served by /uploads)
       const uploadDir = path.join(process.cwd(), "uploads", "crops");
-      await fs.promises.mkdir(uploadDir, { recursive: true });
+      await ensureDir(uploadDir);
 
-      await Promise.all(
-        files.map(async (file) => {
-          // optional guards
-          const allowed = ["image/jpeg", "image/png", "image/webp"];
-          if (!allowed.includes(file.mimetype)) {
-            throw new Error("Only JPG/PNG/WebP images are allowed");
-          }
-          const MAX = 10 * 1024 * 1024;
-          if (file.size > MAX) throw new Error("Photo too large (max 10MB)");
+      for (const file of files) {
+        const allowed = ["image/jpeg", "image/png", "image/webp"];
+        if (!allowed.includes(file.mimetype)) {
+          return res.status(400).json({ message: "Only JPG/PNG/WebP images are allowed" });
+        }
+        const MAX = 10 * 1024 * 1024;
+        if (file.size > MAX) {
+          return res.status(400).json({ message: "Photo too large (max 10MB)" });
+        }
 
-          const ext = path.extname(file.name).toLowerCase();
-          const base = path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "");
-          const filename = `${Date.now()}_${base || "crop"}${ext}`;
-          const filePath = path.join(uploadDir, filename);
-
-          await file.mv(filePath);                 // <-- await!
-          photoPaths.push(`/uploads/crops/${filename}`); // public path
-        })
-      );
+        const ext = path.extname(file.name).toLowerCase() || ".jpg";
+        const base = path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "") || "crop";
+        const filename = `${Date.now()}_${base}${ext}`;
+        const filePath = path.join(uploadDir, filename);
+        await mvFile(file, filePath);
+        photoPaths.push(`/uploads/crops/${filename}`);
+      }
     }
 
-    // sanitize FKs / numbers
+    // Sanitize values
     const vId = toNullableInt(variety_id);
-    const ctId = toNullableInt(crop_type_id);
-    const adminId = toNullableInt(admin_id);
+    const adminId =
+      toNullableInt(admin_id) ??
+      (req.user && toNullableInt(req.user.id)) ??
+      null;
+
+    const estVol = toNullableNumber(estimatedVolume);
+    const estHa = toNullableNumber(estimatedHectares);
 
     const sql = `
       INSERT INTO tbl_crops (
@@ -78,25 +127,26 @@ exports.createCrop = async (req, res) => {
 
     const values = [
       ctId,
-      vId,                                  // NULL if blank
+      vId,
       plantedDate || null,
-      estimatedHarvest || null,
-      estimatedVolume || null,
-      estimatedHectares || null,
+      computedHarvest || null,        // server-computed
+      estVol,
+      estHa,
       note || null,
-      lat,                                   // from first ring point
+      lat,
       lng,
       polygonString,
-      JSON.stringify(photoPaths),            // ["\/uploads\/crops\/..."]
+      JSON.stringify(photoPaths),
       barangay || null,
-      adminId
+      adminId,
     ];
 
     const [result] = await db.promise().query(sql, values);
     return res.status(201).json({
       success: true,
       id: result.insertId,
-      photos: photoPaths
+      estimated_harvest: computedHarvest,
+      photos: photoPaths,
     });
   } catch (err) {
     console.error("Insert error:", err);
@@ -104,9 +154,70 @@ exports.createCrop = async (req, res) => {
   }
 };
 
+// ---------- Get All Crops (list) ----------
+exports.getCrops = async (req, res) => {
+  try {
+    const sql = `
+      SELECT 
+        c.*,
+        ct.name AS crop_name,
+        cv.name AS variety_name,
+        CONCAT(u.first_name, ' ', u.last_name) AS admin_name
+      FROM tbl_crops c
+      JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
+      LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
+      LEFT JOIN tbl_users u ON c.admin_id = u.id
+      ORDER BY c.created_at DESC
+    `;
+    const [rows] = await db.promise().query(sql);
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("getCrops error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+};
+
+// ---------- Get Crop by ID ----------
+exports.getCropById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sql = `
+      SELECT 
+        c.*,
+        ct.name AS crop_name,
+        cv.name AS variety_name,
+        CONCAT(u.first_name, ' ', u.last_name) AS admin_name
+      FROM tbl_crops c
+      JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
+      LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
+      LEFT JOIN tbl_users u ON c.admin_id = u.id
+      WHERE c.id = ?
+    `;
+    const [rows] = await db.promise().query(sql, [id]);
+    if (!rows.length) return res.status(404).json({ message: "Crop not found" });
+    res.status(200).json(rows[0]);
+  } catch (err) {
+    console.error("getCropById error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+};
+
+// ---------- Get All Polygons as GeoJSON ----------
 exports.getAllPolygons = async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT coordinates FROM crops WHERE coordinates IS NOT NULL");
+    const sql = `
+      SELECT 
+        c.*,
+        ct.name AS crop_name,
+        cv.name AS variety_name,
+        CONCAT(u.first_name, ' ', u.last_name) AS admin_name
+      FROM tbl_crops c
+      JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
+      LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
+      LEFT JOIN tbl_users u ON c.admin_id = u.id
+      WHERE c.coordinates IS NOT NULL
+    `;
+    const [rows] = await db.promise().query(sql);
 
     const geojson = {
       type: "FeatureCollection",
@@ -114,85 +225,7 @@ exports.getAllPolygons = async (req, res) => {
         type: "Feature",
         geometry: {
           type: "Polygon",
-          coordinates: JSON.parse(row.coordinates),
-        },
-        properties: {},
-      })),
-    };
-
-    res.json(geojson);
-  } catch (err) {
-    console.error("❌ Failed to get polygons:", err);
-    res.status(500).json({ message: "Error retrieving crop polygons" });
-  }
-};
-
-exports.getCrops = (req, res) => {
-  const sql = `
-    SELECT 
-      c.*,
-      ct.name AS crop_name,
-      cv.name AS variety_name,
-      CONCAT(u.first_name, ' ', u.last_name) AS admin_name
-    FROM tbl_crops c
-    JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
-    LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
-    LEFT JOIN tbl_users u ON c.admin_id = u.id
-    ORDER BY c.created_at DESC
-  `;
-  db.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: "Database error" });
-    res.status(200).json(results);
-  });
-};
-
-exports.getCropById = (req, res) => {
-  const { id } = req.params;
-  const sql = `
-    SELECT 
-      c.*,
-      ct.name AS crop_name,
-      cv.name AS variety_name,
-      CONCAT(u.first_name, ' ', u.last_name) AS admin_name
-    FROM tbl_crops c
-    JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
-    LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
-    LEFT JOIN tbl_users u ON c.admin_id = u.id
-    WHERE c.id = ?
-  `;
-  db.query(sql, [id], (err, results) => {
-    if (err) return res.status(500).json({ error: "Database error" });
-    if (results.length === 0) return res.status(404).json({ message: "Crop not found" });
-    res.status(200).json(results[0]);
-  });
-};
-
-exports.getAllPolygons = (req, res) => {
-  const sql = `
-    SELECT 
-      c.*,
-      ct.name AS crop_name,
-      cv.name AS variety_name,
-      CONCAT(u.first_name, ' ', u.last_name) AS admin_name
-    FROM tbl_crops c
-    JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
-    LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
-     LEFT JOIN tbl_users u ON c.admin_id = u.id
-    WHERE c.coordinates IS NOT NULL
-  `;
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error("❌ Fetch polygons error:", err);
-      return res.status(500).json({ error: "Database error" });
-    }
-
-    const geojson = {
-      type: "FeatureCollection",
-      features: results.map((row) => ({
-        type: "Feature",
-        geometry: {
-          type: "Polygon",
-          // row.coordinates is a JSON string of the ring; mapbox expects [ring]
+          // coordinates stored as ring [[lng,lat],...]; Mapbox expects [ring]
           coordinates: [JSON.parse(row.coordinates)],
         },
         properties: {
@@ -205,37 +238,39 @@ exports.getAllPolygons = (req, res) => {
           estimated_hectares: row.estimated_hectares,
           barangay: row.barangay,
           note: row.note,
-          admin_name: row.admin_name,        // ← include tagger
-          created_at: row.created_at
+          admin_name: row.admin_name,
+          created_at: row.created_at,
         },
       })),
     };
 
     res.json(geojson);
-  });
+  } catch (err) {
+    console.error("Fetch polygons error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
 };
 
-  exports.getCropTypes = (req, res) => {
-    const sql = "SELECT * FROM tbl_crop_types";
-    db.query(sql, (err, results) => {
-      if (err) {
-        console.error("Failed to fetch crop types:", err);
-        return res.status(500).json({ message: "Server error" });
-      }
-      res.status(200).json(results);
-    });
-  };
-  
+// ---------- Taxonomies ----------
+exports.getCropTypes = async (req, res) => {
+  try {
+    const [rows] = await db.promise().query("SELECT * FROM tbl_crop_types");
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("Failed to fetch crop types:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
-  exports.getCropVarietiesByType = (req, res) => {
+exports.getCropVarietiesByType = async (req, res) => {
+  try {
     const { crop_type_id } = req.params;
-    const sql = "SELECT id, name FROM tbl_crop_varieties WHERE crop_type_id = ?";
-    db.query(sql, [crop_type_id], (err, results) => {
-      if (err) {
-        console.error("Failed to fetch crop varieties:", err);
-        return res.status(500).json({ message: "Server error" });
-      }
-      res.status(200).json(results);
-    });
-  };
-  
+    const [rows] = await db
+      .promise()
+      .query("SELECT id, name FROM tbl_crop_varieties WHERE crop_type_id = ?", [crop_type_id]);
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("Failed to fetch crop varieties:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
