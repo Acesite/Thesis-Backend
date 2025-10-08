@@ -36,5 +36,6 @@ router.get("/farmers", async (req, res) => {
 // list and detail
 router.get("/", cropsController.getCrops);
 router.get("/:id", cropsController.getCropById);
-
+router.get("/ecosystems/:crop_type_id", cropsController.getEcosystemsByCropType);
+2
 module.exports = router;

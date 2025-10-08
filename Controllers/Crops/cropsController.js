@@ -351,3 +351,199 @@ exports.getCropVarietiesByType = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+// Add this new function to your cropsController.js
+
+// ---------- get ecosystems by crop type ----------
+exports.getEcosystemsByCropType = async (req, res) => {
+  try {
+    const { crop_type_id } = req.params;
+    const [rows] = await db
+      .promise()
+      .query(
+        "SELECT id, name, name_tagalog, description FROM tbl_ecosystems WHERE crop_type_id = ? ORDER BY id",
+        [crop_type_id]
+      );
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("Failed to fetch ecosystems:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Also update getCrops and related functions to include ecosystem info:
+// In getCrops, getCropById, getAllPolygons - add these to the SELECT:
+// e.name AS ecosystem_name,
+// e.name_tagalog AS ecosystem_name_tagalog
+// 
+// And add this JOIN:
+// LEFT JOIN tbl_ecosystems e ON c.ecosystem_id = e.id
+
+// ---------- Update createCrop to include ecosystem_id ----------
+exports.createCrop = async (req, res) => {
+  try {
+    const {
+      crop_type_id,
+      variety_id,
+      ecosystem_id,  // ADD THIS
+      plantedDate,
+      estimatedVolume,
+      estimatedHectares,
+      note,
+      coordinates,
+      admin_id,
+
+      // farmer fields
+      farmer_first_name,
+      farmer_last_name,
+      farmer_mobile,
+      farmer_barangay,
+      farmer_address,
+      full_address
+    } = req.body;
+
+    const ctId = toNullableInt(crop_type_id);
+    if (!ctId) return res.status(400).json({ message: "crop_type_id is required" });
+    if (!plantedDate) return res.status(400).json({ message: "plantedDate is required" });
+
+    // parse coords ring [[lng,lat],...]
+    const parsedCoords = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
+    if (!Array.isArray(parsedCoords) || !Array.isArray(parsedCoords[0])) {
+      return res.status(400).json({ message: "Invalid coordinates format" });
+    }
+    const [lng, lat] = parsedCoords[0];
+    if (![lng, lat].every((n) => typeof n === "number" && isFinite(n))) {
+      return res.status(400).json({ message: "Invalid coordinate pair" });
+    }
+    const polygonString = JSON.stringify(parsedCoords);
+
+    // compute harvest date on server
+    const maturityDays = STANDARD_MATURITY_DAYS[ctId] || 0;
+    const computedHarvest = addDaysToISO(plantedDate, maturityDays);
+
+    // handle photos
+    const photoPaths = [];
+    const photoFiles = req.files?.photos;
+    if (photoFiles) {
+      const files = Array.isArray(photoFiles) ? photoFiles : [photoFiles];
+      const uploadDir = path.join(process.cwd(), "uploads", "crops");
+      await ensureDir(uploadDir);
+      for (const file of files) {
+        const allowed = ["image/jpeg", "image/png", "image/webp"];
+        if (!allowed.includes(file.mimetype)) {
+          return res.status(400).json({ message: "Only JPG/PNG/WebP images are allowed" });
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          return res.status(400).json({ message: "Photo too large (max 10MB)" });
+        }
+        const ext = path.extname(file.name).toLowerCase() || ".jpg";
+        const base = path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "") || "crop";
+        const filename = `${Date.now()}_${base}${ext}`;
+        const filePath = path.join(uploadDir, filename);
+        await mvFile(file, filePath);
+        photoPaths.push(`/uploads/crops/${filename}`);
+      }
+    }
+
+    const vId = toNullableInt(variety_id);
+    const ecoId = toNullableInt(ecosystem_id);  // ADD THIS
+    const adminId = toNullableInt(admin_id) ?? (req.user && toNullableInt(req.user.id)) ?? null;
+    const estVol = toNullableNumber(estimatedVolume);
+    const estHa = toNullableNumber(estimatedHectares);
+
+    // ---------- farmer upsert by mobile ----------
+    let farmer_id = null;
+
+    if (farmer_mobile) {
+      const [existing] = await db
+        .promise()
+        .query(
+          "SELECT farmer_id FROM tbl_farmers WHERE mobile_number = ? LIMIT 1",
+          [farmer_mobile]
+        );
+
+      const finalAddress = full_address ?? farmer_address ?? null;
+
+      if (existing.length) {
+        farmer_id = existing[0].farmer_id;
+
+        await db.promise().query(
+          `UPDATE tbl_farmers
+             SET first_name = COALESCE(?, first_name),
+                 last_name  = COALESCE(?, last_name),
+                 barangay   = COALESCE(?, barangay),
+                 full_address = COALESCE(?, full_address)
+           WHERE farmer_id = ?`,
+          [farmer_first_name || null, farmer_last_name || null, farmer_barangay || null, finalAddress, farmer_id]
+        );
+      } else {
+        const [ins] = await db
+          .promise()
+          .query(
+            `INSERT INTO tbl_farmers
+               (first_name, last_name, mobile_number, barangay, full_address, created_at)
+             VALUES (?, ?, ?, ?, ?, NOW())`,
+            [
+              farmer_first_name || null,
+              farmer_last_name || null,
+              farmer_mobile,
+              farmer_barangay || null,
+              finalAddress
+            ]
+          );
+        farmer_id = ins.insertId;
+      }
+    }
+
+    // ---------- save crop with ecosystem_id ----------
+    const sql = `
+      INSERT INTO tbl_crops (
+        farmer_id,
+        crop_type_id,
+        variety_id,
+        ecosystem_id,
+        planted_date,
+        estimated_harvest,
+        estimated_volume,
+        estimated_hectares,
+        note,
+        latitude,
+        longitude,
+        coordinates,
+        photos,
+        admin_id,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `;
+
+    const values = [
+      farmer_id,
+      ctId,
+      vId,
+      ecoId,  // ADD THIS
+      plantedDate || null,
+      computedHarvest || null,
+      estVol,
+      estHa,
+      note || null,
+      lat,
+      lng,
+      polygonString,
+      JSON.stringify(photoPaths),
+      adminId
+    ];
+
+    const [result] = await db.promise().query(sql, values);
+
+    res.status(201).json({
+      success: true,
+      id: result.insertId,
+      estimated_harvest: computedHarvest,
+      photos: photoPaths
+    });
+  } catch (err) {
+    console.error("Insert error:", err);
+    res.status(400).json({ message: err.sqlMessage || err.message || "Server error" });
+  }
+};
