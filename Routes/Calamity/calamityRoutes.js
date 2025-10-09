@@ -11,6 +11,15 @@ router.get("/polygons", calamityController.getCalamityPolygons);
 // GET calamity types
 router.get("/types", calamityController.getCalamityTypes);
 
+// GET all ecosystems
+router.get("/ecosystems", calamityController.getAllEcosystems);
+
+// GET all crops
+router.get("/crops", calamityController.getAllCrops);
+
+// GET varieties by crop type
+router.get("/crops/:cropTypeId/varieties", calamityController.getVarietiesByCropType);
+
 // POST new calamity
 router.post("/", calamityController.addCalamity);
 

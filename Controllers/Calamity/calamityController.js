@@ -63,10 +63,66 @@ exports.getCalamityTypes = (req, res) => {
   });
 };
 
+// Get all ecosystems
+exports.getAllEcosystems = (req, res) => {
+  const query = "SELECT id, crop_type_id, name FROM tbl_ecosystems";
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Error fetching ecosystems:", err);
+      return res.status(500).json({ error: err.message });
+    }
+    console.log("Ecosystems fetched:", results);
+    res.json(results);
+  });
+};
+
+// Get all crops
+exports.getAllCrops = (req, res) => {
+  const query = "SELECT id, name FROM tbl_crop_types";
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Error fetching crops:", err);
+      return res.status(500).json({ error: err.message });
+    }
+    console.log("Crops fetched:", results);
+    res.json(results);
+  });
+};
+
+// Get varieties by crop type
+exports.getVarietiesByCropType = (req, res) => {
+  const { cropTypeId } = req.params;
+  
+  if (!cropTypeId) {
+    return res.status(400).json({ error: "Crop type ID is required" });
+  }
+
+  const query = "SELECT id, crop_type_id, name, description FROM tbl_crop_varieties WHERE crop_type_id = ?";
+  db.query(query, [cropTypeId], (err, results) => {
+    if (err) {
+      console.error("Error fetching varieties:", err);
+      return res.status(500).json({ error: err.message });
+    }
+    console.log("Varieties fetched for crop_type_id", cropTypeId, ":", results);
+    res.json(results);
+  });
+};
+
 // Add calamity
 exports.addCalamity = async (req, res) => {
   try {
-    const { calamity_type, description, location, coordinates, admin_id } = req.body;
+    const {
+      calamity_type,
+      description,
+      location,
+      coordinates,
+      admin_id,
+      ecosystem_id,
+      crop_type_id,
+      crop_variety_id,
+      affected_area,
+      crop_stage
+    } = req.body;
 
     if (!calamity_type || !description || !coordinates) {
       return res.status(400).json({ error: "calamity_type, description, and coordinates are required" });
@@ -77,7 +133,7 @@ exports.addCalamity = async (req, res) => {
       return res.status(400).json({ error: "admin_id is required" });
     }
 
-    // optional photo
+    // Optional photo
     let photoPath = null;
     if (req.files?.photo) {
       const photoFile = req.files.photo;
@@ -87,7 +143,7 @@ exports.addCalamity = async (req, res) => {
       await photoFile.mv(path.join(__dirname, "../../", photoPath));
     }
 
-    // parse coords
+    // Parse coords
     const polygon = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
     if (!Array.isArray(polygon) || polygon.length < 3) {
       return res.status(400).json({ error: "Coordinates must be an array with at least 3 points" });
@@ -100,8 +156,8 @@ exports.addCalamity = async (req, res) => {
 
     const sql = `
       INSERT INTO tbl_calamity
-        (calamity_type, description, photo, location, coordinates, latitude, longitude, admin_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (calamity_type, description, photo, location, coordinates, latitude, longitude, admin_id, ecosystem_id, crop_type_id, crop_variety_id, affected_area, crop_stage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     db.query(
@@ -111,10 +167,15 @@ exports.addCalamity = async (req, res) => {
         description,
         photoPath,
         safeLocation,
-        JSON.stringify(polygon), // store as JSON string
+        JSON.stringify(polygon),
         latitude,
         longitude,
-        adminId
+        adminId,
+        ecosystem_id || null,
+        crop_type_id || null,
+        crop_variety_id || null,
+        affected_area || null,
+        crop_stage || null
       ],
       (err, result) => {
         if (err) {
@@ -122,7 +183,6 @@ exports.addCalamity = async (req, res) => {
           return res.status(500).json({ error: "Failed to save calamity: " + err.message });
         }
 
-        // ✅ Return the full created object; coordinates as ARRAY for the client
         return res.status(201).json({
           id: result.insertId,
           calamity_type,
@@ -133,6 +193,11 @@ exports.addCalamity = async (req, res) => {
           latitude,
           longitude,
           admin_id: adminId,
+          ecosystem_id,
+          crop_type_id,
+          crop_variety_id,
+          affected_area,
+          crop_stage
         });
       }
     );
@@ -141,5 +206,3 @@ exports.addCalamity = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
-
-
