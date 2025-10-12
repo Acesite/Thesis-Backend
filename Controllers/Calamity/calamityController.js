@@ -1,114 +1,167 @@
+// controllers/calamities.controller.js
 const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
 
-// Get all calamities
+// ---------- config ----------
+const UPLOAD_SUBDIR = "uploads/calamity";          // -> /uploads/calamity
+const UPLOAD_ABS_DIR = path.join(__dirname, "../../", UPLOAD_SUBDIR);
+
+// ---------- helpers ----------
+function ensureUploadDir() {
+  if (!fs.existsSync(UPLOAD_ABS_DIR)) fs.mkdirSync(UPLOAD_ABS_DIR, { recursive: true });
+}
+
+// Build a server-relative path like: /uploads/calamity/1699999999999_file.png
+function buildSavePath(originalName) {
+  const safe = String(originalName).replace(/\s+/g, "_");
+  return `/${UPLOAD_SUBDIR}/${Date.now()}_${safe}`;
+}
+
+// Turn whatever is in `row.photo` into a clean array of URLs
+function parsePhotoColumnToArray(photoColValue) {
+  if (!photoColValue) return [];
+
+  let raw = photoColValue;
+
+  // try JSON first
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr.filter(Boolean);
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // allow comma separated
+  if (typeof raw === "string" && raw.includes(",")) {
+    return raw.split(",").map(s => s.trim()).filter(Boolean);
+  }
+
+  // otherwise treat as single
+  return [String(raw).trim()].filter(Boolean);
+}
+
+// Ensure entries are absolute-ish (server-relative /uploads/… or http…)
+function normalizeToUploadsOrHttp(list) {
+  return list
+    .filter(Boolean)
+    .map((p) => {
+      const v = String(p).trim();
+      if (!v) return null;
+      if (v.startsWith("/uploads/")) return v;      // already server-relative
+      if (/^https?:\/\//i.test(v)) return v;        // absolute URL allowed
+      // bare filename -> put under calamity folder
+      return `/${UPLOAD_SUBDIR}/${v}`;
+    })
+    .filter(Boolean);
+}
+
+// ---------- controllers ----------
+
+// GET /api/calamities
 exports.getAllCalamities = (req, res) => {
-  const query = "SELECT * FROM tbl_calamity";
-  db.query(query, (err, results) => {
+  // your table has date_reported, not created_at
+  const sql = "SELECT * FROM tbl_calamity ORDER BY date_reported DESC, calamity_id DESC";
+  db.query(sql, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+
+    const out = rows.map((r) => {
+      const photos = normalizeToUploadsOrHttp(parsePhotoColumnToArray(r.photo));
+      const photo = photos[0] || r.photo || null; // keep legacy single for any old UI
+      return { ...r, photos, photo };
+    });
+
+    res.json(out);
   });
 };
 
-// Get GeoJSON polygons
+// GET /api/calamities/polygons
 exports.getCalamityPolygons = (req, res) => {
-  const query = "SELECT calamity_id AS id, calamity_type, coordinates FROM tbl_calamity WHERE coordinates IS NOT NULL";
-  db.query(query, (err, results) => {
+  const sql = `
+    SELECT calamity_id AS id, calamity_type, coordinates
+    FROM tbl_calamity
+    WHERE coordinates IS NOT NULL
+  `;
+  db.query(sql, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    const geojson = {
-      type: "FeatureCollection",
-      features: results
-        .map(c => {
-          let coords;
-          try {
-            coords = JSON.parse(c.coordinates);
-          } catch (e) {
-            console.error(`Invalid coordinates for calamity ${c.id}`, e);
-            return null;
-          }
+    const features = [];
+    for (const c of rows) {
+      try {
+        let coords = JSON.parse(c.coordinates);
+        if (!Array.isArray(coords) || coords.length < 3) continue;
 
-          // Close polygon if needed
-          if (coords.length > 2 && JSON.stringify(coords[0]) !== JSON.stringify(coords[coords.length - 1])) {
-            coords.push(coords[0]);
-          }
+        // close polygon if needed
+        const first = JSON.stringify(coords[0]);
+        const last  = JSON.stringify(coords[coords.length - 1]);
+        if (first !== last) coords = [...coords, coords[0]];
 
-          return {
-            type: "Feature",
-            properties: {
-              id: c.id,
-              calamity_type: c.calamity_type
-            },
-            geometry: {
-              type: "Polygon",
-              coordinates: [coords]
-            }
-          };
-        })
-        .filter(f => f !== null)
-    };
+        features.push({
+          type: "Feature",
+          properties: { id: c.id, calamity_type: c.calamity_type },
+          geometry: { type: "Polygon", coordinates: [coords] },
+        });
+      } catch (e) {
+        console.error(`Invalid coordinates for calamity ${c.id}`, e);
+      }
+    }
 
-    res.json(geojson);
+    res.json({ type: "FeatureCollection", features });
   });
 };
 
-// Get calamity types
+// GET /api/calamities/types
 exports.getCalamityTypes = (req, res) => {
-  const query = "SELECT DISTINCT calamity_type FROM tbl_calamity";
-  db.query(query, (err, results) => {
+  db.query("SELECT DISTINCT calamity_type FROM tbl_calamity", (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    const types = results.map(r => r.calamity_type);
-    res.json(types);
+    res.json(rows.map((r) => r.calamity_type));
   });
 };
 
-// Get all ecosystems
+// GET /api/calamities/ecosystems
 exports.getAllEcosystems = (req, res) => {
-  const query = "SELECT id, crop_type_id, name FROM tbl_ecosystems";
-  db.query(query, (err, results) => {
+  db.query("SELECT id, crop_type_id, name FROM tbl_ecosystems", (err, rows) => {
     if (err) {
       console.error("Error fetching ecosystems:", err);
       return res.status(500).json({ error: err.message });
     }
-    console.log("Ecosystems fetched:", results);
-    res.json(results);
+    res.json(rows);
   });
 };
 
-// Get all crops
+// GET /api/calamities/crops
 exports.getAllCrops = (req, res) => {
-  const query = "SELECT id, name FROM tbl_crop_types";
-  db.query(query, (err, results) => {
+  db.query("SELECT id, name FROM tbl_crop_types", (err, rows) => {
     if (err) {
       console.error("Error fetching crops:", err);
       return res.status(500).json({ error: err.message });
     }
-    console.log("Crops fetched:", results);
-    res.json(results);
+    res.json(rows);
   });
 };
 
-// Get varieties by crop type
+// GET /api/calamities/crops/:cropTypeId/varieties
 exports.getVarietiesByCropType = (req, res) => {
   const { cropTypeId } = req.params;
-  
-  if (!cropTypeId) {
-    return res.status(400).json({ error: "Crop type ID is required" });
-  }
+  if (!cropTypeId) return res.status(400).json({ error: "Crop type ID is required" });
 
-  const query = "SELECT id, crop_type_id, name, description FROM tbl_crop_varieties WHERE crop_type_id = ?";
-  db.query(query, [cropTypeId], (err, results) => {
+  const sql = `
+    SELECT id, crop_type_id, name, description
+    FROM tbl_crop_varieties
+    WHERE crop_type_id = ?
+  `;
+  db.query(sql, [cropTypeId], (err, rows) => {
     if (err) {
       console.error("Error fetching varieties:", err);
       return res.status(500).json({ error: err.message });
     }
-    console.log("Varieties fetched for crop_type_id", cropTypeId, ":", results);
-    res.json(results);
+    res.json(rows);
   });
 };
 
-// Add calamity
+// POST /api/calamities  (multipart/form-data; field name for multiple files is "photos")
 exports.addCalamity = async (req, res) => {
   try {
     const {
@@ -121,86 +174,104 @@ exports.addCalamity = async (req, res) => {
       crop_type_id,
       crop_variety_id,
       affected_area,
-      crop_stage
+      crop_stage,
+      latitude,
+      longitude,
     } = req.body;
 
     if (!calamity_type || !description || !coordinates) {
       return res.status(400).json({ error: "calamity_type, description, and coordinates are required" });
     }
-
     const adminId = Number(admin_id);
-    if (!adminId) {
-      return res.status(400).json({ error: "admin_id is required" });
+    if (!adminId) return res.status(400).json({ error: "admin_id is required" });
+
+    // ---- save files ----
+    ensureUploadDir();
+    const photoPaths = [];
+    const filesToSave = [];
+
+    if (req.files?.photos) {
+      if (Array.isArray(req.files.photos)) filesToSave.push(...req.files.photos);
+      else filesToSave.push(req.files.photos);
+    }
+    if (req.files?.photo) filesToSave.push(req.files.photo);
+
+    for (const f of filesToSave) {
+      const rel = buildSavePath(f.name);    // /uploads/calamity/...
+      const abs = path.join(__dirname, "../../", rel);
+      await f.mv(abs);
+      photoPaths.push(rel);
     }
 
-    // Optional photo
-    let photoPath = null;
-    if (req.files?.photo) {
-      const photoFile = req.files.photo;
-      const uploadDir = path.join(__dirname, "../../uploads");
-      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-      photoPath = `/uploads/${Date.now()}_${photoFile.name}`;
-      await photoFile.mv(path.join(__dirname, "../../", photoPath));
-    }
-
-    // Parse coords
+    // ---- parse polygon + lat/lng ----
     const polygon = typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
     if (!Array.isArray(polygon) || polygon.length < 3) {
       return res.status(400).json({ error: "Coordinates must be an array with at least 3 points" });
     }
+    const [lon0, lat0] = polygon[0] || [];
+    const latVal = latitude != null ? Number(latitude) : Number(lat0) || 0;
+    const lonVal = longitude != null ? Number(longitude) : Number(lon0) || 0;
 
-    const [lon, lat] = polygon[0];
-    const latitude = Number(lat) || 0;
-    const longitude = Number(lon) || 0;
     const safeLocation = location || "Unknown";
+
+    // Store ALL photos inside the single `photo` column as JSON string
+    // (works with your current schema; old rows may still have a single string)
+    const photoColumnValue = JSON.stringify(photoPaths);
 
     const sql = `
       INSERT INTO tbl_calamity
-        (calamity_type, description, photo, location, coordinates, latitude, longitude, admin_id, ecosystem_id, crop_type_id, crop_variety_id, affected_area, crop_stage)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (admin_id, calamity_type, description, ecosystem_id, crop_type_id, crop_variety_id,
+         affected_area, crop_stage, photo, location, date_reported, status,
+         latitude, longitude, coordinates)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'Pending', ?, ?, ?)
     `;
 
-    db.query(
-      sql,
-      [
+    const params = [
+      adminId,
+      calamity_type,
+      description,
+      ecosystem_id || null,
+      crop_type_id || null,
+      crop_variety_id || null,
+      affected_area || null,
+      crop_stage || null,
+      photoColumnValue,                  // JSON array stored in `photo`
+      safeLocation,
+      latVal,
+      lonVal,
+      JSON.stringify(polygon),
+    ];
+
+    db.query(sql, params, (err, result) => {
+      if (err) {
+        console.error("Insert error:", err);
+        return res.status(500).json({ error: "Failed to save calamity: " + err.message });
+      }
+
+      // Respond with normalized shape (always include array)
+      const photosNormalized = normalizeToUploadsOrHttp(photoPaths);
+      res.status(201).json({
+        calamity_id: result.insertId,
+        admin_id: adminId,
         calamity_type,
         description,
-        photoPath,
-        safeLocation,
-        JSON.stringify(polygon),
-        latitude,
-        longitude,
-        adminId,
-        ecosystem_id || null,
-        crop_type_id || null,
-        crop_variety_id || null,
-        affected_area || null,
-        crop_stage || null
-      ],
-      (err, result) => {
-        if (err) {
-          console.error("Insert error:", err);
-          return res.status(500).json({ error: "Failed to save calamity: " + err.message });
-        }
-
-        return res.status(201).json({
-          id: result.insertId,
-          calamity_type,
-          description,
-          photo: photoPath,
-          location: safeLocation,
-          coordinates: polygon,
-          latitude,
-          longitude,
-          admin_id: adminId,
-          ecosystem_id,
-          crop_type_id,
-          crop_variety_id,
-          affected_area,
-          crop_stage
-        });
-      }
-    );
+        ecosystem_id,
+        crop_type_id,
+        crop_variety_id,
+        affected_area,
+        crop_stage,
+        // legacy: first photo (if your UI still reads it)
+        photo: photosNormalized[0] || null,
+        // new: full list for the sidebar
+        photos: photosNormalized,
+        location: safeLocation,
+        date_reported: new Date().toISOString(),
+        status: "Pending",
+        latitude: latVal,
+        longitude: lonVal,
+        coordinates: polygon,
+      });
+    });
   } catch (err) {
     console.error("Unexpected error:", err);
     res.status(500).json({ error: "Internal Server Error" });

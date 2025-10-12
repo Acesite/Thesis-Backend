@@ -1,8 +1,11 @@
+// routes/calamity.routes.js
 const express = require("express");
 const router = express.Router();
+
+// use the controller you just updated
 const calamityController = require("../../Controllers/Calamity/calamityController");
 
-// GET all calamities
+// GET all calamities (returns `photos: []` and legacy `photo`)
 router.get("/", calamityController.getAllCalamities);
 
 // GET calamity polygons (GeoJSON)
@@ -20,7 +23,7 @@ router.get("/crops", calamityController.getAllCrops);
 // GET varieties by crop type
 router.get("/crops/:cropTypeId/varieties", calamityController.getVarietiesByCropType);
 
-// POST new calamity
+// POST new calamity (multipart/form-data; field name for multiple files: "photos")
 router.post("/", calamityController.addCalamity);
 
 module.exports = router;
