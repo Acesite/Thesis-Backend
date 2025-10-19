@@ -1,77 +1,143 @@
 const db = require("../../Config/db");
 
-
-// Get all crops
+/**
+ * GET /api/managecrops
+ * Joins:
+ *  - tbl_crops (c)
+ *  - tbl_crop_types (ct)
+ *  - tbl_crop_varieties (cv)
+ *  - tbl_farmers (f)
+ *  - tbl_users (u) via c.admin_id  ← who tagged the record
+ *
+ * Note: tbl_crops has NO barangay column. We expose crop_barangay = f.barangay
+ * so the frontend shows a value instead of N/A.
+ */
 exports.getAllCrops = (req, res) => {
   const sql = `
-  SELECT 
-  tbl_crops.*, 
-  tbl_crop_types.name AS crop_name,
-  tbl_crop_varieties.name AS variety_name, -- ✅ Add variety name
-  tbl_users.first_name, 
-  tbl_users.last_name 
-  FROM tbl_crops
-  LEFT JOIN tbl_crop_types ON tbl_crops.crop_type_id = tbl_crop_types.id
-  LEFT JOIN tbl_crop_varieties ON tbl_crops.variety_id = tbl_crop_varieties.id -- ✅ Join to get name
-  LEFT JOIN tbl_users ON tbl_crops.admin_id = tbl_users.id
-  ORDER BY tbl_crops.id DESC
+    SELECT
+      /* crop */
+      c.id,
+      c.crop_type_id,
+      c.variety_id,
+      c.planted_date,
+      c.estimated_harvest,
+      c.estimated_volume,
+      c.estimated_hectares,
+      c.note,
+      c.latitude,
+      c.longitude,
+      c.created_at,
+      c.farmer_id,
+      c.admin_id,
 
+      /* map barangay from farmer (since crops table has none) */
+      f.barangay                AS crop_barangay,
+
+      /* type & variety labels */
+      ct.name                   AS crop_name,
+      cv.name                   AS variety_name,
+
+      /* farmer details */
+      f.farmer_id               AS farmer_pk,
+      f.first_name              AS farmer_first_name,
+      f.last_name               AS farmer_last_name,
+      f.mobile_number           AS farmer_mobile,
+      f.barangay                AS farmer_barangay,
+      f.full_address            AS farmer_address,
+      f.created_at              AS farmer_created_at,
+
+      /* tagged by (admin/user who created it) */
+      u.first_name              AS tagger_first_name,
+      u.last_name               AS tagger_last_name,
+      u.email                   AS tagger_email
+
+    FROM tbl_crops c
+    LEFT JOIN tbl_crop_types     ct ON ct.id   = c.crop_type_id
+    LEFT JOIN tbl_crop_varieties cv ON cv.id   = c.variety_id
+    LEFT JOIN tbl_farmers         f ON f.farmer_id = c.farmer_id
+    LEFT JOIN tbl_users           u ON u.id   = c.admin_id
+    ORDER BY c.created_at DESC
   `;
-  
-  db.query(sql, (err, results) => {
+
+  db.query(sql, (err, rows) => {
     if (err) {
-      console.error("Error fetching crops:", err);
-      return res.status(500).json({ message: "Server error" });
+      console.error("getAllCrops error:", err);
+      return res.status(500).json({ success: false, message: "DB error" });
     }
-    res.status(200).json(results);
+    res.json(rows || []);
   });
 };
 
-
-
-// Delete a crop by ID
-exports.deleteCrop = (req, res) => {
-  const { id } = req.params;
-  const sql = "DELETE FROM tbl_crops WHERE id = ?";
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      console.error("Error deleting crop:", err);
-      return res.status(500).json({ message: "Server error" });
-    }
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Crop not found" });
-    }
-    res.status(200).json({ message: "✅ Crop deleted successfully" });
-  });
-};
-
-
-// managecropController.js
+/**
+ * PUT /api/managecrops/:id
+ * Allows updating crop fields and changing the linked farmer via farmer_id
+ */
 exports.updateCrop = (req, res) => {
   const { id } = req.params;
   const {
     crop_type_id,
-    variety_id, // ✅ get the ID
+    variety_id,
     planted_date,
     estimated_harvest,
     estimated_volume,
     estimated_hectares,
-    note
+    note,
+    latitude,
+    longitude,
+    farmer_id,       // optional: re-link to a different farmer
   } = req.body;
-  
+
   const sql = `
-    UPDATE tbl_crops 
-    SET crop_type_id = ?, variety_id = ?, planted_date = ?, estimated_harvest = ?, estimated_volume = ?, estimated_hectares = ?, note = ?
+    UPDATE tbl_crops
+    SET
+      crop_type_id       = ?,
+      variety_id         = ?,
+      planted_date       = ?,
+      estimated_harvest  = ?,
+      estimated_volume   = ?,
+      estimated_hectares = ?,
+      note               = ?,
+      latitude           = ?,
+      longitude          = ?,
+      farmer_id          = ?
     WHERE id = ?
+    LIMIT 1
   `;
-  const values = [crop_type_id, variety_id, planted_date, estimated_harvest, estimated_volume, estimated_hectares, note, id];
-  
-  db.query(sql, values, (err, result) => {
-    if (err) {
-      console.error("Error updating crop:", err);
-      return res.status(500).json({ message: "Server error" });
+
+  db.query(
+    sql,
+    [
+      crop_type_id || null,
+      variety_id || null,
+      planted_date || null,
+      estimated_harvest || null,
+      estimated_volume || null,
+      estimated_hectares || null,
+      note || null,
+      latitude || null,
+      longitude || null,
+      farmer_id || null,
+      id,
+    ],
+    (err, result) => {
+      if (err) {
+        console.error("updateCrop error:", err);
+        return res.status(500).json({ success: false, message: "DB error" });
+      }
+      res.json({ success: true, affectedRows: result.affectedRows });
     }
-    res.status(200).json({ message: "Crop updated successfully" });
-  });
+  );
 };
 
+/** DELETE /api/managecrops/:id */
+exports.deleteCrop = (req, res) => {
+  const { id } = req.params;
+  const sql = `DELETE FROM tbl_crops WHERE id = ? LIMIT 1`;
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      console.error("deleteCrop error:", err);
+      return res.status(500).json({ success: false, message: "DB error" });
+    }
+    res.json({ success: true, affectedRows: result.affectedRows });
+  });
+};
