@@ -1,17 +1,5 @@
 const db = require("../../Config/db");
 
-/**
- * GET /api/managecrops
- * Joins:
- *  - tbl_crops (c)
- *  - tbl_crop_types (ct)
- *  - tbl_crop_varieties (cv)
- *  - tbl_farmers (f)
- *  - tbl_users (u) via c.admin_id  ← who tagged the record
- *
- * Note: tbl_crops has NO barangay column. We expose crop_barangay = f.barangay
- * so the frontend shows a value instead of N/A.
- */
 exports.getAllCrops = (req, res) => {
   const sql = `
     SELECT
