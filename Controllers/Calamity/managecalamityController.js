@@ -1,12 +1,12 @@
 // Controllers/Calamity/managecalamityController.js
-const db = require("../../Config/db"); // <- keep your db.js unchanged
+const db = require("../../Config/db");
 
-/* ------- small promise wrapper so we can await callback-style query() ------- */
+/* Small promise wrapper so we can await callback-style query() */
 const query = (sql, params = []) =>
   new Promise((resolve, reject) => {
-    db.query(sql, params, (err, results/*, fields*/) => {
+    db.query(sql, params, (err, results) => {
       if (err) return reject(err);
-      resolve(results); // results = rows for SELECT; OkPacket for INSERT/UPDATE/DELETE
+      resolve(results);
     });
   });
 
@@ -241,3 +241,50 @@ exports.deleteCalamity = async (req, res) => {
     res.status(500).json({ message: "Failed to delete record." });
   }
 };
+
+exports.listCropTypes = async (_req, res) => {
+  try {
+    const rows = await query(
+      "SELECT id, name FROM tbl_crop_types ORDER BY name ASC"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("listCropTypes error:", err);
+    res.status(500).json({ message: "Failed to fetch crop types." });
+  }
+};
+
+exports.listCropVarieties = async (req, res) => {
+  try {
+    // include crop_type_id for client-side filtering; server-side filter optional
+    const { cropTypeId } = req.query;
+    const rows = await query(
+      cropTypeId
+        ? "SELECT id, name, crop_type_id FROM tbl_crop_varieties WHERE crop_type_id = ? ORDER BY name ASC"
+        : "SELECT id, name, crop_type_id FROM tbl_crop_varieties ORDER BY name ASC",
+      cropTypeId ? [Number(cropTypeId)] : []
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("listCropVarieties error:", err);
+    res.status(500).json({ message: "Failed to fetch crop varieties." });
+  }
+};
+
+exports.listEcosystems = async (req, res) => {
+  try {
+    // IMPORTANT: return crop_type_id so the UI can filter
+    const { cropTypeId } = req.query;
+    const rows = await query(
+      cropTypeId
+        ? "SELECT id, name, crop_type_id FROM tbl_ecosystems WHERE crop_type_id = ? ORDER BY name ASC"
+        : "SELECT id, name, crop_type_id FROM tbl_ecosystems ORDER BY name ASC",
+      cropTypeId ? [Number(cropTypeId)] : []
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("listEcosystems error:", err);
+    res.status(500).json({ message: "Failed to fetch ecosystems." });
+  }
+};
+
