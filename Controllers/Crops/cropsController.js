@@ -372,15 +372,7 @@ exports.getEcosystemsByCropType = async (req, res) => {
   }
 };
 
-// Also update getCrops and related functions to include ecosystem info:
-// In getCrops, getCropById, getAllPolygons - add these to the SELECT:
-// e.name AS ecosystem_name,
-// e.name_tagalog AS ecosystem_name_tagalog
-// 
-// And add this JOIN:
-// LEFT JOIN tbl_ecosystems e ON c.ecosystem_id = e.id
 
-// ---------- Update createCrop to include ecosystem_id ----------
 exports.createCrop = async (req, res) => {
   try {
     const {
