@@ -276,7 +276,7 @@ exports.getAllPolygons = async (_req, res) => {
     const sql = `
       SELECT
         c.*,
-        ct.name AS crop_name,
+        ct.name AS crop_name, 
         cv.name AS variety_name,
         CONCAT(u.first_name, ' ', u.last_name) AS admin_name,
         f.first_name AS farmer_first_name,
