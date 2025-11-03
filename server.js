@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const fileUpload = require("express-fileupload");
 require("dotenv").config();
+const path = require("path");
 
 // Routes
 const userRoutes = require("./Routes/Signup/signupRoutes");
@@ -27,7 +28,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(fileUpload({ createParentPath: true }));
 
 // Static
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Mount routers
 app.use("/", userRoutes);
