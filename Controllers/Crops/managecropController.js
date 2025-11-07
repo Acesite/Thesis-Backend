@@ -1,5 +1,69 @@
+// Controllers/Crops/managecropController.js
 const db = require("../../Config/db");
+const fs = require("fs");
+const fsp = fs.promises;
+const path = require("path");
 
+/* ================== Upload path helpers ================== */
+/** This must match:
+ *   app.use("/uploads", express.static(path.join(__dirname, "uploads")))
+ * in your server.js (which it does).
+ */
+const UPLOAD_ROOT = path.join(__dirname, "..", "..", "uploads");
+
+/** Map various URL/string shapes to a safe local file path under UPLOAD_ROOT. */
+function toLocalUploadPath(maybeUrlOrPath) {
+  if (!maybeUrlOrPath) return null;
+
+  // Absolute URL (http://localhost:5000/uploads/xxx or https://.../uploads/xxx)
+  try {
+    if (/^https?:\/\//i.test(maybeUrlOrPath)) {
+      const u = new URL(maybeUrlOrPath);
+      if (!u.pathname.startsWith("/uploads/")) return null;
+      const rel = u.pathname.replace(/^\/?uploads\/?/, "");
+      return path.join(UPLOAD_ROOT, rel);
+    }
+  } catch (_) {}
+
+  // Starts with /uploads/...
+  if (maybeUrlOrPath.startsWith("/uploads/")) {
+    const rel = maybeUrlOrPath.replace(/^\/?uploads\/?/, "");
+    return path.join(UPLOAD_ROOT, rel);
+  }
+
+  // Bare relative like "crops/a.jpg" → put under /uploads
+  if (!path.isAbsolute(maybeUrlOrPath)) {
+    return path.join(UPLOAD_ROOT, maybeUrlOrPath);
+  }
+
+  // Only allow absolute paths that are inside UPLOAD_ROOT (safety)
+  const normalized = path.normalize(maybeUrlOrPath);
+  if (normalized.startsWith(UPLOAD_ROOT)) return normalized;
+
+  return null;
+}
+
+/** Best-effort removal; won’t fail the request if files are missing. */
+async function removeFilesSafe(fileList = []) {
+  const unique = Array.from(new Set(fileList)).filter(Boolean);
+  const tasks = unique.map(async (raw) => {
+    const local = toLocalUploadPath(raw);
+    if (!local) return { file: raw, status: "skipped" };
+    try {
+      await fsp.unlink(local);
+      return { file: raw, status: "deleted" };
+    } catch (err) {
+      // Ignore ENOENT; log others for debugging
+      if (err.code !== "ENOENT") {
+        console.warn("[deleteCrop] unlink failed:", local, err.code || err.message);
+      }
+      return { file: raw, status: "not_found_or_error" };
+    }
+  });
+  return Promise.allSettled(tasks);
+}
+
+/* ================== READ: list all crops ================== */
 exports.getAllCrops = (req, res) => {
   const sql = `
     SELECT
@@ -17,6 +81,7 @@ exports.getAllCrops = (req, res) => {
       c.created_at,
       c.farmer_id,
       c.admin_id,
+      c.photos,                      -- ensure this column exists if you store photos here
 
       /* map barangay from farmer (since crops table has none) */
       f.barangay                AS crop_barangay,
@@ -56,6 +121,7 @@ exports.getAllCrops = (req, res) => {
   });
 };
 
+/* ================== UPDATE: crop record ================== */
 exports.updateCrop = (req, res) => {
   const { id } = req.params;
   const {
@@ -68,10 +134,9 @@ exports.updateCrop = (req, res) => {
     note,
     latitude,
     longitude,
-    farmer_id, // optional
+    farmer_id, // optional switch to another farmer
   } = req.body;
 
-  // DEBUG: see what came in
   console.log("[updateCrop] id:", id, "payload:", req.body);
 
   const sets = [];
@@ -88,7 +153,6 @@ exports.updateCrop = (req, res) => {
   if (latitude !== undefined)           push("latitude",           latitude || null);
   if (longitude !== undefined)          push("longitude",          longitude || null);
 
-  // farmer_id update?
   const wantsFarmerUpdate = farmer_id !== undefined;
   const numericFarmerId = Number(farmer_id);
 
@@ -106,18 +170,15 @@ exports.updateCrop = (req, res) => {
     `;
     params.push(id);
 
-   
-
     db.query(sql, params, (err, result) => {
       if (err) {
         console.error("updateCrop error:", err);
         return res.status(500).json({ success: false, message: "DB error" });
       }
-      
       return res.json({
         success: true,
         affectedRows: result.affectedRows,
-        changedRows: result.changedRows, // useful to know if anything actually changed
+        changedRows: result.changedRows,
         message:
           result.changedRows > 0
             ? "Crop updated."
@@ -127,17 +188,15 @@ exports.updateCrop = (req, res) => {
   };
 
   if (!wantsFarmerUpdate) {
-    // Don’t touch farmer link
     return finish();
   }
 
-  // User is trying to change farmer: require a real id
+  // Validate farmer_id
   if (!Number.isInteger(numericFarmerId) || numericFarmerId <= 0) {
     console.log("[updateCrop] invalid farmer_id:", farmer_id);
     return res.status(400).json({ success: false, message: "Invalid farmer_id. Pick from the dropdown." });
   }
 
-  // Validate farmer exists
   db.query(
     "SELECT 1 FROM tbl_farmers WHERE farmer_id = ? LIMIT 1",
     [numericFarmerId],
@@ -150,27 +209,72 @@ exports.updateCrop = (req, res) => {
         console.log("[updateCrop] farmer not found:", numericFarmerId);
         return res.status(400).json({ success: false, message: "Farmer not found" });
       }
-      // OK, include farmer update
       push("farmer_id", numericFarmerId);
       return finish();
     }
   );
 };
 
-
-/** DELETE /api/managecrops/:id */
-exports.deleteCrop = (req, res) => {
+/* ================== DELETE: crop (+ delete photos on disk) ================== */
+/** DELETE /api/managecrops/:id
+ *  Also deletes associated photo files stored in tbl_crops.photos
+ *  photos column can be:
+ *    - JSON array string: '["/uploads/crops/a.jpg","/uploads/crops/b.jpg"]'
+ *    - single string "/uploads/crops/a.jpg" or absolute URL to /uploads/...
+ *    - bare relative path like "crops/a.jpg" (treated as /uploads/crops/a.jpg)
+ */
+exports.deleteCrop = async (req, res) => {
   const { id } = req.params;
-  const sql = `DELETE FROM tbl_crops WHERE id = ? LIMIT 1`;
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      console.error("deleteCrop error:", err);
-      return res.status(500).json({ success: false, message: "DB error" });
+
+  // 1) Fetch photos before deleting the row
+  db.query("SELECT photos FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (selErr, rows) => {
+    if (selErr) {
+      console.error("deleteCrop SELECT error:", selErr);
+      return res.status(500).json({ success: false, message: "DB error (select)" });
     }
-    res.json({ success: true, affectedRows: result.affectedRows });
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Crop not found" });
+    }
+
+    const rawPhotos = rows[0].photos;
+    let photoList = [];
+    try {
+      if (typeof rawPhotos === "string" && rawPhotos.trim().startsWith("[")) {
+        photoList = JSON.parse(rawPhotos); // array
+      } else if (typeof rawPhotos === "string" && rawPhotos.trim() !== "") {
+        photoList = [rawPhotos.trim()];
+      } else if (Array.isArray(rawPhotos)) {
+        photoList = rawPhotos;
+      }
+    } catch (e) {
+      console.warn("[deleteCrop] Failed to parse photos JSON; continuing.", e.message);
+    }
+
+    // 2) Delete DB row
+    db.query("DELETE FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (delErr, result) => {
+      if (delErr) {
+        console.error("deleteCrop DELETE error:", delErr);
+        return res.status(500).json({ success: false, message: "DB error (delete)" });
+      }
+
+      // 3) Best-effort file cleanup
+      try {
+        const outcomes = await removeFilesSafe(photoList);
+        console.log("[deleteCrop] file cleanup outcomes:", outcomes);
+      } catch (cleanupErr) {
+        console.warn("[deleteCrop] file cleanup encountered an error:", cleanupErr.message);
+      }
+
+      return res.json({
+        success: true,
+        affectedRows: result.affectedRows,
+        message: "Crop deleted (photos cleaned up where found).",
+      });
+    });
   });
 };
 
+/* ================== UPDATE: farmer name (convenience) ================== */
 exports.updateFarmerName = (req, res) => {
   const { id } = req.params; // farmer_id
   const { first_name, last_name } = req.body;
