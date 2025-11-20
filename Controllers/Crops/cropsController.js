@@ -180,18 +180,23 @@ exports.getAllPolygons = async (_req, res) => {
         ci.cropping_system AS intercrop_cropping_system,
         ci.cropping_description AS intercrop_cropping_description,
         ct2.name AS intercrop_crop_name,
-        cv2.name AS intercrop_variety_name
+        cv2.name AS intercrop_variety_name,
 
+        -- 👇 NEW: “effective” harvested flag
+        CASE
+          WHEN c.is_harvested = 1 THEN 1
+          WHEN c.estimated_harvest IS NOT NULL
+               AND c.estimated_harvest <= CURDATE() THEN 1
+          ELSE 0
+        END AS is_harvested_effective
       FROM tbl_crops c
       JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
       LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
       LEFT JOIN tbl_users u ON c.admin_id = u.id
       LEFT JOIN tbl_farmers f ON c.farmer_id = f.farmer_id
-
       LEFT JOIN tbl_crop_intercrops ci ON ci.crop_id = c.id
       LEFT JOIN tbl_crop_types ct2 ON ci.crop_type_id = ct2.id
       LEFT JOIN tbl_crop_varieties cv2 ON ci.variety_id = cv2.id
-
       WHERE c.coordinates IS NOT NULL
     `;
 
@@ -209,27 +214,10 @@ exports.getAllPolygons = async (_req, res) => {
           id: row.id,
           crop_name: row.crop_name,
           variety_name: row.variety_name,
-          planted_date: row.planted_date,
-          estimated_harvest: row.estimated_harvest,
-          estimated_volume: row.estimated_volume,
-          estimated_hectares: row.estimated_hectares,
-          note: row.note,
-          admin_name: row.admin_name,
-          created_at: row.created_at,
-          farmer_first_name: row.farmer_first_name,
-          farmer_last_name: row.farmer_last_name,
-          farmer_mobile: row.farmer_mobile,
-          farmer_barangay: row.farmer_barangay,
-          farmer_address: row.farmer_address,
+          // ... other props ...
 
-          // use the numeric ID column from tbl_crops
-          cropping_system_id: row.cropping_system_id,
-          is_intercropped: row.is_intercropped,
-
-          intercrop_crop_type_id: row.intercrop_crop_type_id,
-          intercrop_variety_id: row.intercrop_variety_id,
-          intercrop_cropping_system: row.intercrop_cropping_system,
-          intercrop_cropping_description: row.intercrop_cropping_description,
+          // 👇 use effective flag here
+          is_harvested: row.is_harvested_effective,
         },
       })),
     };
@@ -240,6 +228,7 @@ exports.getAllPolygons = async (_req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 };
+
 
 // ===================== TAXONOMIES =====================
 exports.getCropTypes = async (_req, res) => {
@@ -552,3 +541,60 @@ if (isIntercroppedFlag && interCropCtId) {
       .json({ message: err.sqlMessage || err.message || "Server error" });
   }
 };
+
+// ===================== MARK CROP AS HARVESTED =====================
+exports.markCropHarvested = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // safely read harvested_date even if req.body is undefined
+    const { harvested_date: bodyHarvestedDate } = req.body || {};
+    let harvested_date = bodyHarvestedDate;
+
+    const cropId = Number(id);
+    if (!Number.isFinite(cropId)) {
+      return res.status(400).json({ message: "Invalid crop id" });
+    }
+
+    // default to today's date if not provided
+    if (!harvested_date) {
+      harvested_date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    }
+
+    console.log("[markCropHarvested] Updating crop", {
+      cropId,
+      harvested_date,
+      body: req.body,
+    });
+
+    const [result] = await db
+      .promise()
+      .query(
+        `
+        UPDATE tbl_crops
+           SET is_harvested = 1,
+               harvested_date = ?
+         WHERE id = ?
+      `,
+        [harvested_date, cropId]
+      );
+
+    if (result.affectedRows === 0) {
+      console.warn("[markCropHarvested] No crop found with id:", cropId);
+      return res.status(404).json({ message: "Crop not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      id: cropId,
+      harvested_date,
+    });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ message: err.sqlMessage || err.message || "Server error" });
+  }
+};
+
+
+

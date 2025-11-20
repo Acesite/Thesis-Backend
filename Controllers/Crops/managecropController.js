@@ -82,6 +82,8 @@ exports.getAllCrops = (req, res) => {
       c.farmer_id,
       c.admin_id,
       c.photos,
+        c.is_harvested,
+      c.harvested_date,
 
       /* cropping system flags (from tbl_crops) */
       c.cropping_system_id,
@@ -139,7 +141,7 @@ exports.getAllCrops = (req, res) => {
   });
 };
 
-/* ================== UPDATE: crop record ================== */
+/* ================== UPDATE: crop record + intercrop ================== */
 exports.updateCrop = (req, res) => {
   const { id } = req.params;
   const {
@@ -153,14 +155,27 @@ exports.updateCrop = (req, res) => {
     latitude,
     longitude,
     farmer_id, // optional switch to another farmer
+
+    // NEW: cropping + intercropping fields coming from the modal
+    is_intercropped,
+    cropping_system_id,
+    intercrop_crop_type_id,
+    intercrop_variety_id,
+    intercrop_estimated_volume,
+    intercrop_cropping_system,
+    intercrop_cropping_description,
   } = req.body;
 
   console.log("[updateCrop] id:", id, "payload:", req.body);
 
   const sets = [];
   const params = [];
-  const push = (col, val) => { sets.push(`${col} = ?`); params.push(val); };
+  const push = (col, val) => {
+    sets.push(`${col} = ?`);
+    params.push(val);
+  };
 
+  // --- primary crop columns ---
   if (crop_type_id !== undefined)       push("crop_type_id",       crop_type_id || null);
   if (variety_id !== undefined)         push("variety_id",         variety_id || null);
   if (planted_date !== undefined)       push("planted_date",       planted_date || null);
@@ -171,13 +186,55 @@ exports.updateCrop = (req, res) => {
   if (latitude !== undefined)           push("latitude",           latitude || null);
   if (longitude !== undefined)          push("longitude",          longitude || null);
 
+  if (cropping_system_id !== undefined)
+    push("cropping_system_id", cropping_system_id || null);
+
+  if (is_intercropped !== undefined)
+    push("is_intercropped", Number(is_intercropped) ? 1 : 0);
+
   const wantsFarmerUpdate = farmer_id !== undefined;
   const numericFarmerId = Number(farmer_id);
 
-  const finish = () => {
+  // --- secondary crop payload (tbl_crop_intercrops) ---
+  const wantIntercropRow =
+    Number(is_intercropped) === 1 ||
+    intercrop_crop_type_id !== undefined ||
+    intercrop_variety_id !== undefined ||
+    intercrop_estimated_volume !== undefined ||
+    intercrop_cropping_system !== undefined ||
+    intercrop_cropping_description !== undefined;
+
+  const intercropData = {
+    crop_type_id:
+      intercrop_crop_type_id === undefined || intercrop_crop_type_id === ""
+        ? null
+        : intercrop_crop_type_id,
+    variety_id:
+      intercrop_variety_id === undefined || intercrop_variety_id === ""
+        ? null
+        : intercrop_variety_id,
+    estimated_volume:
+      intercrop_estimated_volume === undefined ||
+      intercrop_estimated_volume === ""
+        ? null
+        : intercrop_estimated_volume,
+    cropping_system:
+      intercrop_cropping_system === undefined ||
+      intercrop_cropping_system === ""
+        ? null
+        : intercrop_cropping_system,
+    cropping_description:
+      intercrop_cropping_description === undefined ||
+      intercrop_cropping_description === ""
+        ? null
+        : intercrop_cropping_description,
+  };
+
+  // run UPDATE tbl_crops (or no-op if nothing to change)
+  const runCropUpdate = (cb) => {
     if (sets.length === 0) {
-      console.log("[updateCrop] no fields to update");
-      return res.status(400).json({ success: false, message: "No fields to update" });
+      // nothing for tbl_crops, still maybe want to update intercrop row
+      return cb(null, { affectedRows: 0, changedRows: 0 });
     }
 
     const sql = `
@@ -189,30 +246,100 @@ exports.updateCrop = (req, res) => {
     params.push(id);
 
     db.query(sql, params, (err, result) => {
+      if (err) return cb(err);
+      cb(null, result);
+    });
+  };
+
+  // upsert / delete in tbl_crop_intercrops
+  const upsertIntercrop = (cb) => {
+    if (!wantIntercropRow) {
+      // remove any existing secondary crop if user unchecked intercropping
+      return db.query(
+        "DELETE FROM tbl_crop_intercrops WHERE crop_id = ?",
+        [id],
+        (err) => {
+          if (err) {
+            console.error("[updateCrop] delete intercrop error:", err);
+          }
+          cb();
+        }
+      );
+    }
+
+    // there SHOULD be some secondary data; upsert it
+    db.query(
+      "SELECT id FROM tbl_crop_intercrops WHERE crop_id = ? LIMIT 1",
+      [id],
+      (err, rows) => {
+        if (err) {
+          console.error("[updateCrop] select intercrop error:", err);
+          return cb(); // don't block main update response
+        }
+
+        // strip undefined keys
+        const clean = {};
+        Object.entries(intercropData).forEach(([k, v]) => {
+          if (v !== undefined) clean[k] = v;
+        });
+
+        if (rows && rows.length) {
+          // UPDATE existing secondary crop
+          db.query(
+            "UPDATE tbl_crop_intercrops SET ? WHERE id = ?",
+            [clean, rows[0].id],
+            (err2) => {
+              if (err2) {
+                console.error("[updateCrop] update intercrop error:", err2);
+              }
+              cb();
+            }
+          );
+        } else {
+          // INSERT new secondary crop
+          db.query(
+            "INSERT INTO tbl_crop_intercrops SET ?",
+            [{ crop_id: id, ...clean }],
+            (err2) => {
+              if (err2) {
+                console.error("[updateCrop] insert intercrop error:", err2);
+              }
+              cb();
+            }
+          );
+        }
+      }
+    );
+  };
+
+  const finish = () => {
+    runCropUpdate((err, result) => {
       if (err) {
         console.error("updateCrop error:", err);
         return res.status(500).json({ success: false, message: "DB error" });
       }
-      return res.json({
-        success: true,
-        affectedRows: result.affectedRows,
-        changedRows: result.changedRows,
-        message:
-          result.changedRows > 0
-            ? "Crop updated."
-            : "No changes were applied (values may be identical).",
+
+      upsertIntercrop(() => {
+        return res.json({
+          success: true,
+          affectedRows: result.affectedRows,
+          changedRows: result.changedRows,
+          message: "Crop updated.",
+        });
       });
     });
   };
 
+  // --- farmer linking logic stays as before ---
   if (!wantsFarmerUpdate) {
     return finish();
   }
 
-  // Validate farmer_id
   if (!Number.isInteger(numericFarmerId) || numericFarmerId <= 0) {
     console.log("[updateCrop] invalid farmer_id:", farmer_id);
-    return res.status(400).json({ success: false, message: "Invalid farmer_id. Pick from the dropdown." });
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid farmer_id. Pick from the dropdown." });
   }
 
   db.query(
@@ -225,7 +352,9 @@ exports.updateCrop = (req, res) => {
       }
       if (!rows || rows.length === 0) {
         console.log("[updateCrop] farmer not found:", numericFarmerId);
-        return res.status(400).json({ success: false, message: "Farmer not found" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Farmer not found" });
       }
       push("farmer_id", numericFarmerId);
       return finish();
@@ -271,14 +400,14 @@ exports.deleteCrop = async (req, res) => {
     // 2) Delete DB row
     db.query("DELETE FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (delErr, result) => {
       if (delErr) {
-        console.error("deleteCrop DELETE error:", delErr);
+        
         return res.status(500).json({ success: false, message: "DB error (delete)" });
       }
 
       // 3) Best-effort file cleanup
       try {
         const outcomes = await removeFilesSafe(photoList);
-        console.log("[deleteCrop] file cleanup outcomes:", outcomes);
+       
       } catch (cleanupErr) {
         console.warn("[deleteCrop] file cleanup encountered an error:", cleanupErr.message);
       }

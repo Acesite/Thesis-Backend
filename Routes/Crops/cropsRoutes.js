@@ -33,9 +33,17 @@ router.get("/farmers", async (req, res) => {
   }
 });
 
+// ecosystems (PUT THIS BEFORE "/:id")
+router.get(
+  "/ecosystems/:crop_type_id",
+  cropsController.getEcosystemsByCropType
+);
+
 // list and detail
 router.get("/", cropsController.getCrops);
 router.get("/:id", cropsController.getCropById);
-router.get("/ecosystems/:crop_type_id", cropsController.getEcosystemsByCropType);
-2
+
+// ✅ Harvest route — DO NOT prefix with /api/crops here
+router.patch("/:id/harvest", cropsController.markCropHarvested);
+
 module.exports = router;
