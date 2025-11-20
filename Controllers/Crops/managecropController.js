@@ -81,34 +81,52 @@ exports.getAllCrops = (req, res) => {
       c.created_at,
       c.farmer_id,
       c.admin_id,
-      c.photos,                      -- ensure this column exists if you store photos here
+      c.photos,
+
+      /* cropping system flags (from tbl_crops) */
+      c.cropping_system_id,
+      c.is_intercropped,
+
+      /* secondary crop (from tbl_crop_intercrops) */
+      ci.crop_type_id          AS intercrop_crop_type_id,
+      ci.variety_id            AS intercrop_variety_id,
+      ci.estimated_volume      AS intercrop_estimated_volume,
+      ci.cropping_system       AS intercrop_cropping_system,
+      ci.cropping_description  AS intercrop_cropping_description,
+      ct2.name                 AS intercrop_crop_name,
+      cv2.name                 AS intercrop_variety_name,
 
       /* map barangay from farmer (since crops table has none) */
-      f.barangay                AS crop_barangay,
+      f.barangay               AS crop_barangay,
 
-      /* type & variety labels */
-      ct.name                   AS crop_name,
-      cv.name                   AS variety_name,
+      /* type & variety labels (primary crop) */
+      ct.name                  AS crop_name,
+      cv.name                  AS variety_name,
 
       /* farmer details */
-      f.farmer_id               AS farmer_pk,
-      f.first_name              AS farmer_first_name,
-      f.last_name               AS farmer_last_name,
-      f.mobile_number           AS farmer_mobile,
-      f.barangay                AS farmer_barangay,
-      f.full_address            AS farmer_address,
-      f.created_at              AS farmer_created_at,
+      f.farmer_id              AS farmer_pk,
+      f.first_name             AS farmer_first_name,
+      f.last_name              AS farmer_last_name,
+      f.mobile_number          AS farmer_mobile,
+      f.barangay               AS farmer_barangay,
+      f.full_address           AS farmer_address,
+      f.created_at             AS farmer_created_at,
 
       /* tagged by (admin/user who created it) */
-      u.first_name              AS tagger_first_name,
-      u.last_name               AS tagger_last_name,
-      u.email                   AS tagger_email
+      u.first_name             AS tagger_first_name,
+      u.last_name              AS tagger_last_name,
+      u.email                  AS tagger_email
 
     FROM tbl_crops c
-    LEFT JOIN tbl_crop_types     ct ON ct.id   = c.crop_type_id
-    LEFT JOIN tbl_crop_varieties cv ON cv.id   = c.variety_id
-    LEFT JOIN tbl_farmers         f ON f.farmer_id = c.farmer_id
-    LEFT JOIN tbl_users           u ON u.id   = c.admin_id
+    LEFT JOIN tbl_crop_types      ct  ON ct.id  = c.crop_type_id
+    LEFT JOIN tbl_crop_varieties  cv  ON cv.id  = c.variety_id
+
+    LEFT JOIN tbl_crop_intercrops ci  ON ci.crop_id = c.id
+    LEFT JOIN tbl_crop_types      ct2 ON ct2.id = ci.crop_type_id
+    LEFT JOIN tbl_crop_varieties  cv2 ON cv2.id = ci.variety_id
+
+    LEFT JOIN tbl_farmers         f   ON f.farmer_id = c.farmer_id
+    LEFT JOIN tbl_users           u   ON u.id = c.admin_id
     ORDER BY c.created_at DESC
   `;
 
