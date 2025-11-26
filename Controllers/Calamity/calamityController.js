@@ -1,10 +1,10 @@
-// controllers/calamities.controller.js
+// Controllers/Calamity/calamityController.js
 const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
 
 // ---------- config ----------
-const UPLOAD_SUBDIR = "uploads/calamity";          // -> /uploads/calamity
+const UPLOAD_SUBDIR = "uploads/calamity"; // -> /uploads/calamity
 const UPLOAD_ABS_DIR = path.join(__dirname, "../../", UPLOAD_SUBDIR);
 
 // ---------- helpers ----------
@@ -36,7 +36,10 @@ function parsePhotoColumnToArray(photoColValue) {
 
   // allow comma separated
   if (typeof raw === "string" && raw.includes(",")) {
-    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   // otherwise treat as single
@@ -51,7 +54,7 @@ function normalizeToUploadsOrHttp(list) {
       const v = String(p).trim();
       if (!v) return null;
       if (v.startsWith("/uploads/")) return v; // already server-relative
-      if (/^https?:\/\//i.test(v)) return v;   // absolute URL allowed
+      if (/^https?:\/\//i.test(v)) return v; // absolute URL allowed
       // bare filename -> put under calamity folder
       return `/${UPLOAD_SUBDIR}/${v}`;
     })
@@ -182,8 +185,14 @@ exports.addCalamity = async (req, res) => {
       latitude,
       longitude,
       barangay,
-      status,             // existing
-      severity_level,     // NEW
+      status, // existing
+      severity_level, // NEW
+      // farmer fields from TagCalamityForm
+      farmer_first_name,
+      farmer_last_name,
+      farmer_mobile_number,
+      farmer_barangay,
+      farmer_full_address,
     } = req.body;
 
     if (!calamity_type || !description || !coordinates) {
@@ -193,6 +202,15 @@ exports.addCalamity = async (req, res) => {
     }
     const adminId = Number(admin_id);
     if (!adminId) return res.status(400).json({ error: "admin_id is required" });
+
+    // normalize farmer fields (optional but recommended)
+    const farmerFirstName = farmer_first_name ? String(farmer_first_name).trim() : null;
+    const farmerLastName = farmer_last_name ? String(farmer_last_name).trim() : null;
+    const farmerMobile = farmer_mobile_number
+      ? String(farmer_mobile_number).trim()
+      : null;
+    const farmerBarangay = farmer_barangay ? String(farmer_barangay).trim() : null;
+    const farmerAddress = farmer_full_address ? String(farmer_full_address).trim() : null;
 
     // ---- save files ----
     ensureUploadDir();
@@ -234,7 +252,9 @@ exports.addCalamity = async (req, res) => {
     // ---- severity validation ----
     const ALLOWED_SEVERITY = new Set(["Low", "Moderate", "High", "Severe"]);
     const requestedSeverity = String(severity_level || "").trim();
-    const safeSeverity = ALLOWED_SEVERITY.has(requestedSeverity) ? requestedSeverity : null;
+    const safeSeverity = ALLOWED_SEVERITY.has(requestedSeverity)
+      ? requestedSeverity
+      : null;
 
     // Store ALL photos inside the single `photo` column as JSON string
     const photoColumnValue = JSON.stringify(photoPaths);
@@ -260,7 +280,7 @@ exports.addCalamity = async (req, res) => {
       safeLocation,
       safeBarangay,
       safeStatus,
-      safeSeverity,     // NEW: matches column order
+      safeSeverity, // NEW: matches column order
       latVal,
       lonVal,
       JSON.stringify(polygon),
@@ -272,10 +292,38 @@ exports.addCalamity = async (req, res) => {
         return res.status(500).json({ error: "Failed to save calamity: " + err.message });
       }
 
+      const calamityId = result.insertId;
+
+      // Insert farmer record tied to this calamity
+      if (farmerFirstName || farmerLastName || farmerMobile || farmerBarangay || farmerAddress) {
+        const farmerSql = `
+          INSERT INTO tbl_farmer_calamity
+            (calamity_id, last_name, first_name, mobile_number, barangay, full_address)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        db.query(
+          farmerSql,
+          [
+            calamityId,
+            farmerLastName || null,
+            farmerFirstName || null,
+            farmerMobile || null,
+            farmerBarangay || null,
+            farmerAddress || null,
+          ],
+          (farmerErr) => {
+            if (farmerErr) {
+              console.error("Failed to insert into tbl_farmer_calamity:", farmerErr);
+              // we still continue; calamity already saved
+            }
+          }
+        );
+      }
+
       // Respond with normalized shape (always include array)
       const photosNormalized = normalizeToUploadsOrHttp(photoPaths);
       res.status(201).json({
-        calamity_id: result.insertId,
+        calamity_id: calamityId,
         admin_id: adminId,
         calamity_type,
         description,
@@ -292,10 +340,18 @@ exports.addCalamity = async (req, res) => {
         barangay: safeBarangay,
         date_reported: new Date().toISOString(),
         status: safeStatus,
-        severity_level: safeSeverity, // NEW
+        severity_level: safeSeverity,
         latitude: latVal,
         longitude: lonVal,
         coordinates: polygon,
+        // optional farmer echo
+        farmer: {
+          first_name: farmerFirstName,
+          last_name: farmerLastName,
+          mobile_number: farmerMobile,
+          barangay: farmerBarangay,
+          full_address: farmerAddress,
+        },
       });
     });
   } catch (err) {
@@ -303,3 +359,42 @@ exports.addCalamity = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+// GET /api/calamities/:id/farmer
+exports.getFarmerByCalamityId = (req, res) => {
+  const { id } = req.params; // calamity_id
+
+  if (!id) {
+    return res.status(400).json({ error: "Calamity ID is required" });
+  }
+
+  const sql = `
+    SELECT 
+      farmer_id,
+      calamity_id,
+      first_name,
+      last_name,
+      mobile_number,
+      barangay,
+      full_address,
+      created_at
+    FROM tbl_farmer_calamity
+    WHERE calamity_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+
+  db.query(sql, [id], (err, rows) => {
+    if (err) {
+      console.error("Error fetching farmer for calamity:", err);
+      return res.status(500).json({ error: err.message });
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ message: "No farmer linked to this calamity" });
+    }
+
+    res.json(rows[0]);
+  });
+};
+

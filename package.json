@@ -20,6 +20,7 @@
     "express": "^5.1.0",
     "express-fileupload": "^1.5.1",
     "jsonwebtoken": "^9.0.2",
+    "mapbox-gl-compare": "^0.4.1",
     "mysql2": "^3.14.0",
     "nodemon": "^3.1.9"
   }

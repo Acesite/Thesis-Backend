@@ -45,5 +45,6 @@ router.get("/:id", cropsController.getCropById);
 
 // ✅ Harvest route — DO NOT prefix with /api/crops here
 router.patch("/:id/harvest", cropsController.markCropHarvested);
+router.get("/:id/history", cropsController.getCropHistory);
 
 module.exports = router;

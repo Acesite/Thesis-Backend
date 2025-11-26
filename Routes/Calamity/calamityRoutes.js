@@ -26,4 +26,6 @@ router.get("/crops/:cropTypeId/varieties", calamityController.getVarietiesByCrop
 // POST new calamity (multipart/form-data; field name for multiple files: "photos")
 router.post("/", calamityController.addCalamity);
 
+router.get("/:id/farmer", calamityController.getFarmerByCalamityId);
+
 module.exports = router;
