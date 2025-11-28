@@ -613,25 +613,74 @@ exports.markCropHarvested = async (req, res) => {
   }
 
 };
+
 exports.getCropHistory = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const sql = `
-      SELECT *
-      FROM tbl_crop_history
-      WHERE crop_id = ?
-      ORDER BY date_planted DESC
-    `;
+    // 1️⃣ Get the current crop's coordinates (same polygon = same field)
+    const [currentRows] = await db
+      .promise()
+      .query(
+        `
+        SELECT coordinates
+        FROM tbl_crops
+        WHERE id = ?
+        LIMIT 1
+      `,
+        [id]
+      );
 
-    const [rows] = await db.promise().query(sql, [id]);
+    if (!currentRows.length || !currentRows[0].coordinates) {
+      // no coordinates → no history
+      return res.status(200).json([]);
+    }
 
-    res.status(200).json(rows);
+    const polygonJson = currentRows[0].coordinates;
+
+    // 2️⃣ Find all history rows with the same polygon, excluding this crop_id
+    const [history] = await db
+      .promise()
+      .query(
+        `
+        SELECT
+          h.id,
+          h.crop_id,
+          h.date_planted,
+          h.date_harvested,
+          h.hectares,
+          h.polygon_geojson,
+
+          c.estimated_volume,
+          c.estimated_hectares,
+          c.estimated_harvest,
+          c.created_at,
+          c.crop_type_id,
+          c.variety_id,
+
+          ct.name AS crop_name,
+          cv.name AS variety_name
+        FROM tbl_crop_history h
+        JOIN tbl_crops c
+          ON h.crop_id = c.id
+        JOIN tbl_crop_types ct
+          ON c.crop_type_id = ct.id
+        LEFT JOIN tbl_crop_varieties cv
+          ON c.variety_id = cv.id
+        WHERE h.polygon_geojson = ?
+          AND h.crop_id <> ?
+        ORDER BY h.date_planted ASC, c.created_at ASC
+      `,
+        [polygonJson, id]
+      );
+
+    return res.status(200).json(history);
   } catch (err) {
     console.error("History fetch error:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 

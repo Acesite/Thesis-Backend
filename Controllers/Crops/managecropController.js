@@ -1,4 +1,3 @@
-// Controllers/Crops/managecropController.js
 const db = require("../../Config/db");
 const fs = require("fs");
 const fsp = fs.promises;
@@ -82,7 +81,7 @@ exports.getAllCrops = (req, res) => {
       c.farmer_id,
       c.admin_id,
       c.photos,
-        c.is_harvested,
+      c.is_harvested,
       c.harvested_date,
 
       /* cropping system flags (from tbl_crops) */
@@ -362,64 +361,24 @@ exports.updateCrop = (req, res) => {
   );
 };
 
-/* ================== DELETE: crop (+ delete photos on disk) ================== */
-/** DELETE /api/managecrops/:id
- *  Also deletes associated photo files stored in tbl_crops.photos
- *  photos column can be:
- *    - JSON array string: '["/uploads/crops/a.jpg","/uploads/crops/b.jpg"]'
- *    - single string "/uploads/crops/a.jpg" or absolute URL to /uploads/...
- *    - bare relative path like "crops/a.jpg" (treated as /uploads/crops/a.jpg)
- */
 exports.deleteCrop = async (req, res) => {
   const { id } = req.params;
 
-  // 1) Fetch photos before deleting the row
-  db.query("SELECT photos FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (selErr, rows) => {
-    if (selErr) {
-      console.error("deleteCrop SELECT error:", selErr);
-      return res.status(500).json({ success: false, message: "DB error (select)" });
-    }
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Crop not found" });
+  // 1) Mark the crop as deleted (soft delete) in tbl_crops
+  const sqlUpdate = "UPDATE tbl_crops SET is_deleted = 1, deleted_at = NOW() WHERE id = ?";
+  db.query(sqlUpdate, [id], (err, result) => {
+    if (err) {
+      console.error("Soft delete error:", err);
+      return res.status(500).json({ success: false, message: "Error marking crop as deleted" });
     }
 
-    const rawPhotos = rows[0].photos;
-    let photoList = [];
-    try {
-      if (typeof rawPhotos === "string" && rawPhotos.trim().startsWith("[")) {
-        photoList = JSON.parse(rawPhotos); // array
-      } else if (typeof rawPhotos === "string" && rawPhotos.trim() !== "") {
-        photoList = [rawPhotos.trim()];
-      } else if (Array.isArray(rawPhotos)) {
-        photoList = rawPhotos;
-      }
-    } catch (e) {
-      console.warn("[deleteCrop] Failed to parse photos JSON; continuing.", e.message);
-    }
-
-    // 2) Delete DB row
-    db.query("DELETE FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (delErr, result) => {
-      if (delErr) {
-        
-        return res.status(500).json({ success: false, message: "DB error (delete)" });
-      }
-
-      // 3) Best-effort file cleanup
-      try {
-        const outcomes = await removeFilesSafe(photoList);
-       
-      } catch (cleanupErr) {
-        console.warn("[deleteCrop] file cleanup encountered an error:", cleanupErr.message);
-      }
-
-      return res.json({
-        success: true,
-        affectedRows: result.affectedRows,
-        message: "Crop deleted (photos cleaned up where found).",
-      });
+    return res.json({
+      success: true,
+      message: "Crop marked as deleted. It will no longer appear in the active list, but historical data is preserved."
     });
   });
 };
+
 
 /* ================== UPDATE: farmer name (convenience) ================== */
 exports.updateFarmerName = (req, res) => {
