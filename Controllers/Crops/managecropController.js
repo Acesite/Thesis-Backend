@@ -74,6 +74,7 @@ exports.getAllCrops = (req, res) => {
       c.estimated_harvest,
       c.estimated_volume,
       c.estimated_hectares,
+      c.avg_elevation_m, 
       c.note,
       c.latitude,
       c.longitude,

@@ -288,3 +288,43 @@ exports.listEcosystems = async (req, res) => {
   }
 };
 
+exports.listCalamityFarmers = async (req, res) => {
+  try {
+    const calamityId = req.params.id;
+
+    const rows = await query(
+      `
+      SELECT
+        fc.calamity_id,
+        fc.farmer_id,
+
+        -- Prefer master 'tbl_farmers' values; fall back to link row fields
+        COALESCE(f.first_name, fc.first_name)  AS first_name,
+        COALESCE(f.last_name,  fc.last_name)   AS last_name,
+        COALESCE(f.mobile_number, fc.mobile_number) AS mobile_number,
+        COALESCE(f.barangay, fc.barangay)      AS barangay,
+        COALESCE(f.full_address, fc.full_address) AS full_address,
+
+        -- convenience
+        CONCAT(
+          COALESCE(f.first_name, fc.first_name, ''), ' ',
+          COALESCE(f.last_name,  fc.last_name,  '')
+        ) AS full_name
+      FROM tbl_farmer_calamity AS fc
+      LEFT JOIN tbl_farmers AS f
+        ON f.farmer_id = fc.farmer_id
+      WHERE fc.calamity_id = ?
+      ORDER BY
+        (COALESCE(f.last_name, fc.last_name) IS NULL),
+        COALESCE(f.last_name, fc.last_name),
+        COALESCE(f.first_name, fc.first_name)
+      `,
+      [req.params.id]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("listCalamityFarmers error:", err);
+    res.status(500).json({ message: "Failed to fetch farmers for calamity." });
+  }
+};

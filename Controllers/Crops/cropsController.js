@@ -304,6 +304,11 @@ exports.createCrop = async (req, res) => {
       farmer_barangay,
       farmer_address,
       full_address,
+
+      // 🔹 elevation from frontend (any of these names)
+      avg_elevation_m,
+      avgElevationM,
+      avgElevation,
     } = req.body;
 
     const ctId = toNullableInt(crop_type_id);
@@ -390,6 +395,11 @@ exports.createCrop = async (req, res) => {
     const estVol = toNullableNumber(estimatedVolume);
     const estHa = toNullableNumber(estimatedHectares);
 
+    // 🔹 elevation numeric value
+    const avgElevationMVal = toNullableNumber(
+      avg_elevation_m ?? avgElevationM ?? avgElevation
+    );
+
     // ---------- farmer upsert ----------
     let farmer_id = null;
 
@@ -457,6 +467,7 @@ exports.createCrop = async (req, res) => {
         estimated_harvest,
         estimated_volume,
         estimated_hectares,
+        avg_elevation_m,
         note,
         latitude,
         longitude,
@@ -465,7 +476,7 @@ exports.createCrop = async (req, res) => {
         admin_id,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
 
     const values = [
@@ -479,6 +490,7 @@ exports.createCrop = async (req, res) => {
       computedHarvest || null,
       estVol,
       estHa,
+      avgElevationMVal, // 🔹 here
       note || null,
       lat,
       lng,
@@ -488,7 +500,7 @@ exports.createCrop = async (req, res) => {
     ];
 
     const [result] = await db.promise().query(sql, values);
-   
+
     await db.promise().query(
       `
         INSERT INTO tbl_crop_history
@@ -547,7 +559,6 @@ exports.createCrop = async (req, res) => {
       .json({ message: err.sqlMessage || err.message || "Server error" });
   }
 };
-
 // ===================== MARK CROP AS HARVESTED =====================
 exports.markCropHarvested = async (req, res) => {
   try {
