@@ -3,11 +3,6 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 
-/* ================== Upload path helpers ================== */
-/** This must match:
- *   app.use("/uploads", express.static(path.join(__dirname, "uploads")))
- * in your server.js (which it does).
- */
 const UPLOAD_ROOT = path.join(__dirname, "..", "..", "uploads");
 
 /** Map various URL/string shapes to a safe local file path under UPLOAD_ROOT. */
@@ -62,7 +57,6 @@ async function removeFilesSafe(fileList = []) {
   return Promise.allSettled(tasks);
 }
 
-/* ================== READ: list all crops ================== */
 exports.getAllCrops = (req, res) => {
   const sql = `
     SELECT
@@ -74,7 +68,7 @@ exports.getAllCrops = (req, res) => {
       c.estimated_harvest,
       c.estimated_volume,
       c.estimated_hectares,
-      c.avg_elevation_m, 
+      c.avg_elevation_m,
       c.note,
       c.latitude,
       c.longitude,
@@ -112,7 +106,10 @@ exports.getAllCrops = (req, res) => {
       f.mobile_number          AS farmer_mobile,
       f.barangay               AS farmer_barangay,
       f.full_address           AS farmer_address,
-      f.created_at             AS farmer_created_at,
+      f.tenure_id              AS farmer_tenure_id,
+
+      /* 🔹 tenure label */
+      tt.tenure_name           AS tenure_name,
 
       /* tagged by (admin/user who created it) */
       u.first_name             AS tagger_first_name,
@@ -128,7 +125,9 @@ exports.getAllCrops = (req, res) => {
     LEFT JOIN tbl_crop_varieties  cv2 ON cv2.id = ci.variety_id
 
     LEFT JOIN tbl_farmers         f   ON f.farmer_id = c.farmer_id
+    LEFT JOIN tbl_land_tenure_types tt ON tt.tenure_id = f.tenure_id   /* 👈 NEW JOIN */
     LEFT JOIN tbl_users           u   ON u.id = c.admin_id
+
     ORDER BY c.created_at DESC
   `;
 
@@ -140,6 +139,7 @@ exports.getAllCrops = (req, res) => {
     res.json(rows || []);
   });
 };
+
 
 /* ================== UPDATE: crop record + intercrop ================== */
 exports.updateCrop = (req, res) => {

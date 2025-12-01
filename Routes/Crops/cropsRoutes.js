@@ -12,6 +12,12 @@ router.post("/", cropsController.createCrop);
 router.get("/types", cropsController.getCropTypes);
 router.get("/varieties/:crop_type_id", cropsController.getCropVarietiesByType);
 
+// ecosystems (PUT THIS BEFORE "/:id")
+router.get("/ecosystems/:crop_type_id", cropsController.getEcosystemsByCropType);
+
+// 🔹 tenure types
+router.get("/tenure-types", cropsController.getTenureTypes);
+
 // polygons
 router.get("/polygons", cropsController.getAllPolygons);
 
@@ -22,7 +28,8 @@ router.get("/farmers", async (req, res) => {
       .promise()
       .query(
         `SELECT farmer_id, first_name, last_name, barangay,
-                COALESCE(NULLIF(full_address,''), '') AS full_address
+                COALESCE(NULLIF(full_address,''), '') AS full_address,
+                tenure_id
          FROM tbl_farmers
          ORDER BY first_name, last_name`
       );
@@ -33,17 +40,11 @@ router.get("/farmers", async (req, res) => {
   }
 });
 
-// ecosystems (PUT THIS BEFORE "/:id")
-router.get(
-  "/ecosystems/:crop_type_id",
-  cropsController.getEcosystemsByCropType
-);
-
 // list and detail
 router.get("/", cropsController.getCrops);
 router.get("/:id", cropsController.getCropById);
 
-// ✅ Harvest route — DO NOT prefix with /api/crops here
+// ✅ Harvest route
 router.patch("/:id/harvest", cropsController.markCropHarvested);
 router.get("/:id/history", cropsController.getCropHistory);
 

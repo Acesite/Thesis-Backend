@@ -23,7 +23,7 @@ const STANDARD_MATURITY_DAYS = {
   3: 360, // Banana
   4: 365, // Sugarcane
   5: 300, // Cassava
-  6: 60, // Vegetables
+  6: 60,  // Vegetables
 };
 
 // ---------- fixed labels + descriptions for intercropping ----------
@@ -104,7 +104,11 @@ exports.getCrops = async (_req, res) => {
         ci.cropping_system AS intercrop_cropping_system,
         ci.cropping_description AS intercrop_cropping_description,
         ct2.name AS intercrop_crop_name,
-        cv2.name AS intercrop_variety_name
+        cv2.name AS intercrop_variety_name,
+
+        -- 🔹 tenure (tenure_id is on tbl_farmers)
+        tt.tenure_id   AS tenure_id,
+        tt.tenure_name AS tenure_name
 
       FROM tbl_crops c
       JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
@@ -115,6 +119,8 @@ exports.getCrops = async (_req, res) => {
       LEFT JOIN tbl_crop_intercrops ci ON ci.crop_id = c.id
       LEFT JOIN tbl_crop_types ct2 ON ci.crop_type_id = ct2.id
       LEFT JOIN tbl_crop_varieties cv2 ON ci.variety_id = cv2.id
+
+      LEFT JOIN tbl_land_tenure_types tt ON f.tenure_id = tt.tenure_id
 
       ORDER BY c.created_at DESC
     `;
@@ -141,12 +147,16 @@ exports.getCropById = async (req, res) => {
         f.last_name  AS farmer_last_name,
         f.mobile_number AS farmer_mobile,
         f.barangay AS farmer_barangay,
-        f.full_address AS farmer_address
+        f.full_address AS farmer_address,
+        -- 🔹 tenure (from farmer)
+        tt.tenure_id   AS tenure_id,
+        tt.tenure_name AS tenure_name
       FROM tbl_crops c
       JOIN tbl_crop_types ct ON c.crop_type_id = ct.id
       LEFT JOIN tbl_crop_varieties cv ON c.variety_id = cv.id
       LEFT JOIN tbl_users u ON c.admin_id = u.id
       LEFT JOIN tbl_farmers f ON c.farmer_id = f.farmer_id
+      LEFT JOIN tbl_land_tenure_types tt ON f.tenure_id = tt.tenure_id
       WHERE c.id = ?
       LIMIT 1
     `;
@@ -182,6 +192,9 @@ exports.getAllPolygons = async (_req, res) => {
         ct2.name AS intercrop_crop_name,
         cv2.name AS intercrop_variety_name,
 
+        -- 🔹 tenure (from farmer)
+        tt.tenure_name AS tenure_name,
+
         -- 👇 NEW: “effective” harvested flag
         CASE
           WHEN c.is_harvested = 1 THEN 1
@@ -197,6 +210,7 @@ exports.getAllPolygons = async (_req, res) => {
       LEFT JOIN tbl_crop_intercrops ci ON ci.crop_id = c.id
       LEFT JOIN tbl_crop_types ct2 ON ci.crop_type_id = ct2.id
       LEFT JOIN tbl_crop_varieties cv2 ON ci.variety_id = cv2.id
+      LEFT JOIN tbl_land_tenure_types tt ON f.tenure_id = tt.tenure_id
       WHERE c.coordinates IS NOT NULL
     `;
 
@@ -214,6 +228,7 @@ exports.getAllPolygons = async (_req, res) => {
           id: row.id,
           crop_name: row.crop_name,
           variety_name: row.variety_name,
+          tenure_name: row.tenure_name, // 🔹
 
           // dates for timeline filter
           planted_date: row.planted_date,
@@ -276,6 +291,22 @@ exports.getEcosystemsByCropType = async (req, res) => {
   }
 };
 
+// ---------- 🔹 tenure types ----------
+exports.getTenureTypes = async (_req, res) => {
+  try {
+    // your table columns are tenure_id / tenure_name
+    const [rows] = await db
+      .promise()
+      .query(
+        "SELECT tenure_id AS id, tenure_name AS name, description FROM tbl_land_tenure_types ORDER BY tenure_id"
+      );
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("Failed to fetch tenure types:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.createCrop = async (req, res) => {
   try {
     const {
@@ -309,6 +340,9 @@ exports.createCrop = async (req, res) => {
       avg_elevation_m,
       avgElevationM,
       avgElevation,
+
+      // 🔹 tenure from frontend (belongs to farmer)
+      tenure_id,
     } = req.body;
 
     const ctId = toNullableInt(crop_type_id);
@@ -400,6 +434,9 @@ exports.createCrop = async (req, res) => {
       avg_elevation_m ?? avgElevationM ?? avgElevation
     );
 
+    // 🔹 tenure numeric value (to be stored on tbl_farmers)
+    const tenureIdVal = toNullableInt(tenure_id);
+
     // ---------- farmer upsert ----------
     let farmer_id = null;
 
@@ -422,7 +459,8 @@ exports.createCrop = async (req, res) => {
                SET first_name = COALESCE(?, first_name),
                    last_name  = COALESCE(?, last_name),
                    barangay   = COALESCE(?, barangay),
-                   full_address = COALESCE(?, full_address)
+                   full_address = COALESCE(?, full_address),
+                   tenure_id  = COALESCE(?, tenure_id)
              WHERE farmer_id = ?
           `,
           [
@@ -430,6 +468,7 @@ exports.createCrop = async (req, res) => {
             farmer_last_name || null,
             farmer_barangay || null,
             finalAddress,
+            tenureIdVal,
             farmer_id,
           ]
         );
@@ -439,8 +478,8 @@ exports.createCrop = async (req, res) => {
           .query(
             `
               INSERT INTO tbl_farmers
-                (first_name, last_name, mobile_number, barangay, full_address, created_at)
-              VALUES (?, ?, ?, ?, ?, NOW())
+                (first_name, last_name, mobile_number, barangay, full_address, tenure_id, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, NOW())
             `,
             [
               farmer_first_name || null,
@@ -448,6 +487,7 @@ exports.createCrop = async (req, res) => {
               farmer_mobile,
               farmer_barangay || null,
               finalAddress,
+              tenureIdVal,
             ]
           );
         farmer_id = ins.insertId;
@@ -490,7 +530,7 @@ exports.createCrop = async (req, res) => {
       computedHarvest || null,
       estVol,
       estHa,
-      avgElevationMVal, // 🔹 here
+      avgElevationMVal,
       note || null,
       lat,
       lng,
@@ -559,6 +599,7 @@ exports.createCrop = async (req, res) => {
       .json({ message: err.sqlMessage || err.message || "Server error" });
   }
 };
+
 // ===================== MARK CROP AS HARVESTED =====================
 exports.markCropHarvested = async (req, res) => {
   try {
@@ -596,15 +637,14 @@ exports.markCropHarvested = async (req, res) => {
         [harvested_date, cropId]
       );
 
-      await db.promise().query(
-  `
-    UPDATE tbl_crop_history
-    SET date_harvested = ?
-    WHERE crop_id = ?
-  `,
-  [harvested_date, cropId]
-);
-
+    await db.promise().query(
+      `
+        UPDATE tbl_crop_history
+        SET date_harvested = ?
+        WHERE crop_id = ?
+      `,
+      [harvested_date, cropId]
+    );
 
     if (result.affectedRows === 0) {
       console.warn("[markCropHarvested] No crop found with id:", cropId);
@@ -620,9 +660,7 @@ exports.markCropHarvested = async (req, res) => {
     return res
       .status(500)
       .json({ message: err.sqlMessage || err.message || "Server error" });
-
   }
-
 };
 
 exports.getCropHistory = async (req, res) => {
@@ -691,7 +729,3 @@ exports.getCropHistory = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
-
-
-
-
