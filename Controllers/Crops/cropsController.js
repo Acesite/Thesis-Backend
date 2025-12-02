@@ -307,6 +307,8 @@ exports.getTenureTypes = async (_req, res) => {
   }
 };
 
+// Controllers/Crops/cropsController.js
+
 exports.createCrop = async (req, res) => {
   try {
     const {
@@ -328,7 +330,7 @@ exports.createCrop = async (req, res) => {
       coordinates,
       admin_id,
 
-      // farmer
+      // farmer (may be blank if anonymous)
       farmer_first_name,
       farmer_last_name,
       farmer_mobile,
@@ -336,24 +338,41 @@ exports.createCrop = async (req, res) => {
       farmer_address,
       full_address,
 
-      // 🔹 elevation from frontend (any of these names)
+      // elevation aliases
       avg_elevation_m,
       avgElevationM,
       avgElevation,
 
-      // 🔹 tenure from frontend (belongs to farmer)
+      // tenure belongs to farmer
       tenure_id,
+
+      // 🔹 NEW: privacy flag from frontend
+      is_anonymous_farmer,
+
+      // 🔹 location barangay from frontend (used as fallback)
+      barangay,
     } = req.body;
+
+    const toNullableInt = (v) => {
+      if (Array.isArray(v)) v = v[0];
+      if (v === undefined || v === null || v === "" || v === "null") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const toNullableNumber = (v) => {
+      if (v === undefined || v === null || v === "" || v === "null") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
 
     const ctId = toNullableInt(crop_type_id);
     if (!ctId) return res.status(400).json({ message: "crop_type_id is required" });
     if (!plantedDate)
       return res.status(400).json({ message: "plantedDate is required" });
 
-    // ---------- coordinates ----------
+    // ---------- coords ----------
     const parsedCoords =
       typeof coordinates === "string" ? JSON.parse(coordinates) : coordinates;
-
     if (!Array.isArray(parsedCoords) || !Array.isArray(parsedCoords[0])) {
       return res.status(400).json({ message: "Invalid coordinates format" });
     }
@@ -363,19 +382,28 @@ exports.createCrop = async (req, res) => {
     }
     const polygonString = JSON.stringify(parsedCoords);
 
-    // ---------- computed harvest ----------
-    const maturityDays = STANDARD_MATURITY_DAYS[ctId] || 0;
-    const computedHarvest = addDaysToISO(plantedDate, maturityDays);
+    // ---------- compute harvest ----------
+    const STANDARD_MATURITY_DAYS = { 1:100, 2:110, 3:360, 4:365, 5:300, 6:60 };
+    const addDaysToISO = (d, days) => {
+      if (!d || !days) return null;
+      const obj = new Date(d + "T00:00:00");
+      if (Number.isNaN(obj.getTime())) return null;
+      obj.setDate(obj.getDate() + Number(days));
+      return obj.toISOString().slice(0, 10);
+    };
+    const computedHarvest = addDaysToISO(plantedDate, STANDARD_MATURITY_DAYS[ctId] || 0);
 
-    // ---------- handle photos ----------
+    // ---------- photos ----------
     const photoPaths = [];
     const photoFiles = req.files?.photos;
+    const ensureDir = async (dir) => fs.promises.mkdir(dir, { recursive: true });
+    const mvFile = (file, destPath) =>
+      new Promise((resolve, reject) => file.mv(destPath, (err) => (err ? reject(err) : resolve())));
 
     if (photoFiles) {
       const files = Array.isArray(photoFiles) ? photoFiles : [photoFiles];
       const uploadDir = path.join(process.cwd(), "uploads", "crops");
       await ensureDir(uploadDir);
-
       for (const file of files) {
         const allowed = ["image/jpeg", "image/png", "image/webp"];
         if (!allowed.includes(file.mimetype)) {
@@ -384,14 +412,10 @@ exports.createCrop = async (req, res) => {
         if (file.size > 10 * 1024 * 1024) {
           return res.status(400).json({ message: "Photo too large" });
         }
-
         const ext = path.extname(file.name).toLowerCase() || ".jpg";
-        const base =
-          path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "") || "crop";
-
+        const base = path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "") || "crop";
         const filename = `${Date.now()}_${base}${ext}`;
         const filePath = path.join(uploadDir, filename);
-
         await mvFile(file, filePath);
         photoPaths.push(`/uploads/crops/${filename}`);
       }
@@ -400,28 +424,26 @@ exports.createCrop = async (req, res) => {
     const vId = toNullableInt(variety_id);
     const ecoId = toNullableInt(ecosystem_id);
 
-    // ---------- intercrop parse ----------
+    // ---------- intercropping ----------
     const interCropCtId = toNullableInt(intercrop_crop_type_id);
     const interCropVarId = toNullableInt(intercrop_variety_id);
     const interCropEstVol = toNullableNumber(intercrop_estimated_volume);
+    const isIntercroppedFlag = ["1", 1, true, "true", "yes", "on"].includes(is_intercropped) ? 1 : 0;
 
-    const isIntercroppedFlag = ["1", 1, true, "true", "yes", "on"].includes(
-      is_intercropped
-    )
-      ? 1
-      : 0;
-
-    // ---------- cropping system ----------
-    const croppingSystemKey = (
-      cropping_system || (isIntercroppedFlag ? "intercrop" : "monocrop")
-    ).toLowerCase();
-
-    const croppingMeta = CROPPING_META[croppingSystemKey] || null;
-    const croppingSystemId = CROPPING_SYSTEM_IDS[croppingSystemKey] || null;
-    const croppingSystemLabel = croppingMeta
-      ? croppingMeta.label
-      : croppingSystemKey;
-    const croppingDescription = croppingMeta ? croppingMeta.description : null;
+    // ---------- cropping system meta ----------
+    const CROPPING_META = {
+      monocrop: { label: "Monocrop", description: "Planting and managing only one crop species in a field at a time." },
+      intercrop: { label: "Intercropped (2 crops)", description: "Growing two different crops together in the same field and season..." },
+      relay: { label: "Relay intercropping", description: "Planting a second crop into a standing first crop..." },
+      strip: { label: "Strip intercropping", description: "Growing two or more crops in long, wide strips..." },
+      mixed: { label: "Mixed cropping / Polyculture", description: "Growing several crops mixed together..." },
+    };
+    const CROPPING_SYSTEM_IDS = { monocrop:1, intercrop:2, relay:3, strip:4, mixed:5 };
+    const csKey = (cropping_system || (isIntercroppedFlag ? "intercrop" : "monocrop")).toLowerCase();
+    const csMeta = CROPPING_META[csKey] || null;
+    const croppingSystemId = CROPPING_SYSTEM_IDS[csKey] || null;
+    const croppingSystemLabel = csMeta ? csMeta.label : csKey;
+    const croppingDescription = csMeta ? csMeta.description : null;
 
     const adminIdNum =
       toNullableInt(admin_id) ?? (req.user && toNullableInt(req.user.id)) ?? null;
@@ -429,30 +451,41 @@ exports.createCrop = async (req, res) => {
     const estVol = toNullableNumber(estimatedVolume);
     const estHa = toNullableNumber(estimatedHectares);
 
-    // 🔹 elevation numeric value
     const avgElevationMVal = toNullableNumber(
       avg_elevation_m ?? avgElevationM ?? avgElevation
     );
-
-    // 🔹 tenure numeric value (to be stored on tbl_farmers)
     const tenureIdVal = toNullableInt(tenure_id);
 
-    // ---------- farmer upsert ----------
+    // ---------- 🔹 farmer upsert (handles anonymous) ----------
+    const isAnonymous = ["1", 1, true, "true", "yes", "on"].includes(is_anonymous_farmer);
     let farmer_id = null;
 
-    if (farmer_mobile) {
+    if (isAnonymous) {
+      // Create a minimal farmer. Use farmer_barangay or fall back to field barangay.
+      const anonBarangay = farmer_barangay || barangay || null;
+      const [insAnon] = await db.promise().query(
+        `
+          INSERT INTO tbl_farmers
+            (first_name, last_name, mobile_number, barangay, full_address, tenure_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, NOW())
+        `,
+        ["Anonymous", "Farmer", null, anonBarangay, null, null]
+      );
+      farmer_id = insAnon.insertId;
+    } else {
+      // Original logic: find by mobile, update or insert
+      if (!farmer_mobile) {
+        return res.status(400).json({ message: "farmer_mobile is required (or mark anonymous)" });
+      }
+
       const [existing] = await db
         .promise()
-        .query(
-          "SELECT farmer_id FROM tbl_farmers WHERE mobile_number = ? LIMIT 1",
-          [farmer_mobile]
-        );
+        .query("SELECT farmer_id FROM tbl_farmers WHERE mobile_number = ? LIMIT 1", [farmer_mobile]);
 
       const finalAddress = full_address ?? farmer_address ?? null;
 
       if (existing.length) {
         farmer_id = existing[0].farmer_id;
-
         await db.promise().query(
           `
             UPDATE tbl_farmers
@@ -473,23 +506,21 @@ exports.createCrop = async (req, res) => {
           ]
         );
       } else {
-        const [ins] = await db
-          .promise()
-          .query(
-            `
-              INSERT INTO tbl_farmers
-                (first_name, last_name, mobile_number, barangay, full_address, tenure_id, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, NOW())
-            `,
-            [
-              farmer_first_name || null,
-              farmer_last_name || null,
-              farmer_mobile,
-              farmer_barangay || null,
-              finalAddress,
-              tenureIdVal,
-            ]
-          );
+        const [ins] = await db.promise().query(
+          `
+            INSERT INTO tbl_farmers
+              (first_name, last_name, mobile_number, barangay, full_address, tenure_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+          `,
+          [
+            farmer_first_name || null,
+            farmer_last_name || null,
+            farmer_mobile,
+            farmer_barangay || null,
+            finalAddress,
+            tenureIdVal,
+          ]
+        );
         farmer_id = ins.insertId;
       }
     }
@@ -518,7 +549,6 @@ exports.createCrop = async (req, res) => {
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
-
     const values = [
       farmer_id,
       ctId,
@@ -538,26 +568,19 @@ exports.createCrop = async (req, res) => {
       JSON.stringify(photoPaths),
       adminIdNum,
     ];
-
     const [result] = await db.promise().query(sql, values);
 
+    // history
     await db.promise().query(
       `
         INSERT INTO tbl_crop_history
           (crop_id, crop_type_id, variety_id, polygon_geojson, hectares, date_planted)
         VALUES (?, ?, ?, ?, ?, ?)
       `,
-      [
-        result.insertId,
-        ctId,
-        vId,
-        JSON.stringify(parsedCoords),
-        estHa,
-        plantedDate,
-      ]
+      [result.insertId, ctId, vId, JSON.stringify(parsedCoords), estHa, plantedDate]
     );
 
-    // ---------- SECONDARY CROP ----------
+    // secondary crop
     if (isIntercroppedFlag && interCropCtId) {
       const [icResult] = await db.promise().query(
         `
@@ -575,13 +598,8 @@ exports.createCrop = async (req, res) => {
           note || null,
         ]
       );
-
       await db.promise().query(
-        `
-          UPDATE tbl_crops
-             SET intercrop_id = ?, intercrop_variety_id = ?
-           WHERE id = ?
-        `,
+        `UPDATE tbl_crops SET intercrop_id = ?, intercrop_variety_id = ? WHERE id = ?`,
         [icResult.insertId, interCropVarId, result.insertId]
       );
     }
@@ -594,11 +612,10 @@ exports.createCrop = async (req, res) => {
     });
   } catch (err) {
     console.error("Insert error:", err);
-    res
-      .status(400)
-      .json({ message: err.sqlMessage || err.message || "Server error" });
+    res.status(400).json({ message: err.sqlMessage || err.message || "Server error" });
   }
 };
+
 
 // ===================== MARK CROP AS HARVESTED =====================
 exports.markCropHarvested = async (req, res) => {
