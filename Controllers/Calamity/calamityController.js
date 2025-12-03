@@ -398,4 +398,3 @@ exports.getFarmerByCalamityId = (req, res) => {
   });
 };
 
-//
