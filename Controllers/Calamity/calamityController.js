@@ -1,4 +1,4 @@
-// Controllers/Calamity/calamityController.js
+// Controllers/Calamity/calamityController.js 
 const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
@@ -398,3 +398,4 @@ exports.getFarmerByCalamityId = (req, res) => {
   });
 };
 
+//
