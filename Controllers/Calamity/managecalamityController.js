@@ -328,3 +328,94 @@ exports.listCalamityFarmers = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch farmers for calamity." });
   }
 };
+
+
+// Update farmer credentials for a calamity (link row + master row if present)
+exports.updateCalamityFarmer = async (req, res) => {
+  try {
+    const calamityId = Number(req.params.id);
+    const farmerId = Number(req.params.farmerId);
+
+    if (!calamityId || !farmerId) {
+      return res.status(400).json({ message: "Missing calamityId or farmerId." });
+    }
+
+    const b = req.body || {};
+    const fields = {
+      first_name: b.first_name ?? null,
+      last_name: b.last_name ?? null,
+      mobile_number: b.mobile_number ?? null,
+      barangay: b.barangay ?? null,
+      full_address: b.full_address ?? null,
+    };
+
+    // 1) Update link table (tbl_farmer_calamity)
+    const linkSql = `
+      UPDATE tbl_farmer_calamity
+      SET first_name = ?, last_name = ?, mobile_number = ?, barangay = ?, full_address = ?
+      WHERE calamity_id = ? AND farmer_id = ?
+    `;
+    const linkArgs = [
+      fields.first_name, fields.last_name, fields.mobile_number, fields.barangay, fields.full_address,
+      calamityId, farmerId,
+    ];
+    const linkResult = await query(linkSql, linkArgs);
+
+    if (linkResult.affectedRows === 0) {
+      // If your schema always has a link row, this shouldn't happen. Otherwise, optionally insert:
+      await query(
+        `INSERT INTO tbl_farmer_calamity (calamity_id, farmer_id, first_name, last_name, mobile_number, barangay, full_address)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [calamityId, farmerId, fields.first_name, fields.last_name, fields.mobile_number, fields.barangay, fields.full_address]
+      );
+    }
+
+    // 2) Also update master tbl_farmers if the record exists (keeps things consistent)
+    const masterExists = await query(
+      `SELECT 1 FROM tbl_farmers WHERE farmer_id = ? LIMIT 1`,
+      [farmerId]
+    );
+    if (masterExists.length) {
+      await query(
+        `UPDATE tbl_farmers
+         SET first_name = COALESCE(?, first_name),
+             last_name  = COALESCE(?, last_name),
+             mobile_number = COALESCE(?, mobile_number),
+             barangay = COALESCE(?, barangay),
+             full_address = COALESCE(?, full_address)
+         WHERE farmer_id = ?`,
+        [fields.first_name, fields.last_name, fields.mobile_number, fields.barangay, fields.full_address, farmerId]
+      );
+    }
+
+    // 3) Return the refreshed farmer (merged like listCalamityFarmers does)
+    const rows = await query(
+      `
+      SELECT
+        fc.calamity_id,
+        fc.farmer_id,
+        COALESCE(f.first_name, fc.first_name)  AS first_name,
+        COALESCE(f.last_name,  fc.last_name)   AS last_name,
+        COALESCE(f.mobile_number, fc.mobile_number) AS mobile_number,
+        COALESCE(f.barangay, fc.barangay)      AS barangay,
+        COALESCE(f.full_address, fc.full_address) AS full_address,
+        CONCAT(
+          COALESCE(f.first_name, fc.first_name, ''), ' ',
+          COALESCE(f.last_name,  fc.last_name,  '')
+        ) AS full_name
+      FROM tbl_farmer_calamity AS fc
+      LEFT JOIN tbl_farmers AS f
+        ON f.farmer_id = fc.farmer_id
+      WHERE fc.calamity_id = ? AND fc.farmer_id = ?
+      LIMIT 1
+      `,
+      [calamityId, farmerId]
+    );
+
+    res.json(rows[0] || null);
+  } catch (err) {
+    console.error("updateCalamityFarmer error:", err);
+    res.status(500).json({ message: "Failed to update farmer credentials." });
+  }
+};
+

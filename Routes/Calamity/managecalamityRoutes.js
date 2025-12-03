@@ -19,4 +19,6 @@ router.put("/:id", ctrl.updateCalamity);
 router.delete("/:id", ctrl.deleteCalamity);
 
 router.get("/:id/farmers", ctrl.listCalamityFarmers);
+router.put("/:id/farmers/:farmerId", ctrl.updateCalamityFarmer);
+
 module.exports = router;

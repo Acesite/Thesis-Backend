@@ -156,6 +156,8 @@ exports.updateCrop = (req, res) => {
     longitude,
     farmer_id, // optional switch to another farmer
 
+    is_harvested,
+  harvested_date,
     // NEW: cropping + intercropping fields coming from the modal
     is_intercropped,
     cropping_system_id,
@@ -185,6 +187,9 @@ exports.updateCrop = (req, res) => {
   if (note !== undefined)               push("note",               note || null);
   if (latitude !== undefined)           push("latitude",           latitude || null);
   if (longitude !== undefined)          push("longitude",          longitude || null);
+  if (is_harvested !== undefined)        push("is_harvested", Number(is_harvested) ? 1 : 0);
+if (harvested_date !== undefined)      push("harvested_date", harvested_date || null);
+
 
   if (cropping_system_id !== undefined)
     push("cropping_system_id", cropping_system_id || null);
