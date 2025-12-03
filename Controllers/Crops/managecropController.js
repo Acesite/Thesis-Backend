@@ -381,10 +381,17 @@ exports.deleteCrop = async (req, res) => {
 };
 
 
-/* ================== UPDATE: farmer name (convenience) ================== */
+/* ================== UPDATE: farmer details (name + contact + tenure) ================== */
 exports.updateFarmerName = (req, res) => {
   const { id } = req.params; // farmer_id
-  const { first_name, last_name } = req.body;
+  // accept the same payload your frontend sends
+  const {
+    first_name,
+    last_name,
+    mobile: mobile_number,      // frontend key -> DB column
+    address: full_address,      // frontend key -> DB column
+    tenure_id,                  // FK to tbl_land_tenure_types.tenure_id
+  } = req.body;
 
   if (!id) {
     return res.status(400).json({ success: false, message: "farmer_id is required" });
@@ -394,8 +401,17 @@ exports.updateFarmerName = (req, res) => {
   const params = [];
   const push = (col, val) => { sets.push(`${col} = ?`); params.push(val); };
 
-  if (first_name !== undefined) push("first_name", (first_name || "").trim());
-  if (last_name  !== undefined) push("last_name",  (last_name  || "").trim());
+  // only set what is provided (undefined → ignore, empty string → set NULL for nullable fields)
+  if (first_name !== undefined)   push("first_name",   (first_name || "").trim());
+  if (last_name  !== undefined)   push("last_name",    (last_name  || "").trim());
+  if (mobile_number !== undefined)push("mobile_number",(mobile_number || "").trim() || null);
+  if (full_address  !== undefined)push("full_address", (full_address  || "").trim() || null);
+
+  // tenure_id: allow null to clear; ensure numeric if provided
+  if (tenure_id !== undefined) {
+    const t = String(tenure_id).trim();
+    push("tenure_id", t === "" ? null : Number(t));
+  }
 
   if (sets.length === 0) {
     return res.status(400).json({ success: false, message: "No fields to update" });
@@ -411,7 +427,7 @@ exports.updateFarmerName = (req, res) => {
 
   db.query(sql, params, (err, result) => {
     if (err) {
-      console.error("updateFarmerName error:", err);
+      console.error("updateFarmer details error:", err);
       return res.status(500).json({ success: false, message: "DB error" });
     }
     return res.json({
@@ -422,3 +438,4 @@ exports.updateFarmerName = (req, res) => {
     });
   });
 };
+
