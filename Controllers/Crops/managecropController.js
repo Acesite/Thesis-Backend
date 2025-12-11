@@ -108,7 +108,7 @@ exports.getAllCrops = (req, res) => {
       f.full_address           AS farmer_address,
       f.tenure_id              AS farmer_tenure_id,
 
-      /* 🔹 tenure label */
+      /* tenure label */
       tt.tenure_name           AS tenure_name,
 
       /* tagged by (admin/user who created it) */
@@ -125,8 +125,10 @@ exports.getAllCrops = (req, res) => {
     LEFT JOIN tbl_crop_varieties  cv2 ON cv2.id = ci.variety_id
 
     LEFT JOIN tbl_farmers         f   ON f.farmer_id = c.farmer_id
-    LEFT JOIN tbl_land_tenure_types tt ON tt.tenure_id = f.tenure_id   /* 👈 NEW JOIN */
+    LEFT JOIN tbl_land_tenure_types tt ON tt.tenure_id = f.tenure_id
     LEFT JOIN tbl_users           u   ON u.id = c.admin_id
+
+    WHERE c.is_deleted = 0 OR c.is_deleted IS NULL   /* 🔹 FILTER OUT DELETED CROPS */
 
     ORDER BY c.created_at DESC
   `;
@@ -367,23 +369,36 @@ if (harvested_date !== undefined)      push("harvested_date", harvested_date || 
   );
 };
 
-exports.deleteCrop = async (req, res) => {
+exports.deleteCrop = (req, res) => {
   const { id } = req.params;
 
-  // 1) Mark the crop as deleted (soft delete) in tbl_crops
-  const sqlUpdate = "UPDATE tbl_crops SET is_deleted = 1, deleted_at = NOW() WHERE id = ?";
-  db.query(sqlUpdate, [id], (err, result) => {
+  // accept from auth, body, or header
+  const incomingUserId =
+    (req.user && req.user.id) ||
+    (req.body && req.body.deleted_by) ||
+    req.headers["x-user-id"] ||
+    null;
+
+  console.log("[deleteCrop] id:", id, "deleted_by(incoming):", incomingUserId);
+
+  // If not provided, default to the record creator (admin_id) so we always have a name to show.
+  const sql = `
+    UPDATE tbl_crops
+    SET is_deleted = 1,
+        deleted_at = NOW(),
+        deleted_by = COALESCE(?, admin_id)
+    WHERE id = ?
+    LIMIT 1
+  `;
+  db.query(sql, [incomingUserId, id], (err) => {
     if (err) {
       console.error("Soft delete error:", err);
       return res.status(500).json({ success: false, message: "Error marking crop as deleted" });
     }
-
-    return res.json({
-      success: true,
-      message: "Crop marked as deleted. It will no longer appear in the active list, but historical data is preserved."
-    });
+    return res.json({ success: true, message: "Crop marked as deleted." });
   });
 };
+
 
 
 /* ================== UPDATE: farmer details (name + contact + tenure) ================== */

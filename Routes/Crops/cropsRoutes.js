@@ -5,23 +5,23 @@ const router = express.Router();
 const db = require("../../Config/db"); // for /farmers
 const cropsController = require("../../Controllers/Crops/cropsController");
 
-// create
+// ---------- create ----------
 router.post("/", cropsController.createCrop);
 
-// taxonomies
+// ---------- taxonomies ----------
 router.get("/types", cropsController.getCropTypes);
 router.get("/varieties/:crop_type_id", cropsController.getCropVarietiesByType);
 
-// ecosystems (PUT THIS BEFORE "/:id")
+// ---------- ecosystems (PUT THIS BEFORE "/:id") ----------
 router.get("/ecosystems/:crop_type_id", cropsController.getEcosystemsByCropType);
 
-// 🔹 tenure types
+// ---------- 🔹 tenure types ----------
 router.get("/tenure-types", cropsController.getTenureTypes);
 
-// polygons
+// ---------- polygons ----------
 router.get("/polygons", cropsController.getAllPolygons);
 
-// simple farmer list (useful for dropdowns)
+// ---------- simple farmer list (useful for dropdowns) ----------
 router.get("/farmers", async (req, res) => {
   try {
     const [rows] = await db
@@ -40,12 +40,16 @@ router.get("/farmers", async (req, res) => {
   }
 });
 
-// list and detail
+// ---------- list and detail ----------
 router.get("/", cropsController.getCrops);
 router.get("/:id", cropsController.getCropById);
 
-// ✅ Harvest route
+// ---------- harvest + history ----------
 router.patch("/:id/harvest", cropsController.markCropHarvested);
 router.get("/:id/history", cropsController.getCropHistory);
+
+// ---------- archive / unarchive ----------
+router.post("/:id/archive", cropsController.archiveSeason);
+router.post("/:id/unarchive", cropsController.unarchiveSeason);
 
 module.exports = router;

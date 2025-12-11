@@ -49,3 +49,6 @@ const getTotalCrops = (req, res) => {
 };
 
 module.exports = { getCropTypeCounts, getTotalCrops };
+
+
+

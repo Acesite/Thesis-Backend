@@ -34,7 +34,7 @@ const farmersProfileRoutes = require("./Routes/Farmers/FarmersProfileRoutes");
 const farmerLoginRoutes = require("./Routes/Login/loginFarmerRoutes");
 const calamityRoutes = require("./Routes/Calamity/calamityRoutes");
 const manageCalamityRoutes = require("./Routes/Calamity/managecalamityRoutes");
-
+const archiveRoutes = require("./Routes/Archive/archiveRoutes");
 // Optional: health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -50,6 +50,8 @@ app.use("/api/farmers", farmersProfileRoutes);
 app.use("/api/farmers", farmerLoginRoutes);
 app.use("/api/calamities", calamityRoutes);
 app.use("/api/managecalamities", manageCalamityRoutes);
+app.use("/api/archive", archiveRoutes);
+
 
 // ──────────────────────────────────────────────────────────
 /* 3) Serve the React build from the sibling folder */
