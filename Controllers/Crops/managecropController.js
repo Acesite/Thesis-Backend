@@ -372,32 +372,58 @@ if (harvested_date !== undefined)      push("harvested_date", harvested_date || 
 exports.deleteCrop = (req, res) => {
   const { id } = req.params;
 
-  // accept from auth, body, or header
+  // Accept from auth, header, or body
   const incomingUserId =
     (req.user && req.user.id) ||
-    (req.body && req.body.deleted_by) ||
     req.headers["x-user-id"] ||
+    (req.body && req.body.deleted_by) ||
     null;
 
-  console.log("[deleteCrop] id:", id, "deleted_by(incoming):", incomingUserId);
+  // 1) Require a valid numeric deleter id
+  const deleterId = Number(incomingUserId);
+  if (!Number.isInteger(deleterId) || deleterId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Missing or invalid deleter id. Please include X-User-Id header or body.deleted_by.",
+    });
+  }
 
-  // If not provided, default to the record creator (admin_id) so we always have a name to show.
-  const sql = `
-    UPDATE tbl_crops
-    SET is_deleted = 1,
-        deleted_at = NOW(),
-        deleted_by = COALESCE(?, admin_id)
-    WHERE id = ?
-    LIMIT 1
-  `;
-  db.query(sql, [incomingUserId, id], (err) => {
-    if (err) {
-      console.error("Soft delete error:", err);
-      return res.status(500).json({ success: false, message: "Error marking crop as deleted" });
+  // 2) Optional: verify the user exists (safer audit trail)
+  const verifySql = "SELECT 1 FROM tbl_users WHERE id = ? LIMIT 1";
+  db.query(verifySql, [deleterId], (verifyErr, rows) => {
+    if (verifyErr) {
+      console.error("verify deleter error:", verifyErr);
+      return res.status(500).json({ success: false, message: "DB error" });
     }
-    return res.json({ success: true, message: "Crop marked as deleted." });
+    if (!rows || !rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Deleter user not found.",
+      });
+    }
+
+    // 3) Perform soft delete with explicit deleter
+    const sql = `
+      UPDATE tbl_crops
+      SET is_deleted = 1,
+          deleted_at = NOW(),
+          deleted_by = ?
+      WHERE id = ?
+      LIMIT 1
+    `;
+    db.query(sql, [deleterId, id], (err) => {
+      if (err) {
+        console.error("Soft delete error:", err);
+        return res
+          .status(500)
+          .json({ success: false, message: "Error marking crop as deleted" });
+      }
+      return res.json({ success: true, message: "Crop marked as deleted." });
+    });
   });
 };
+
 
 
 

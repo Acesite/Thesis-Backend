@@ -118,7 +118,9 @@ exports.restoreCrop = (req, res) => {
   const { id } = req.params;
   const sql = `
     UPDATE tbl_crops
-    SET is_deleted = 0, deleted_at = NULL, deleted_by = NULL
+    SET is_deleted = 0, 
+        deleted_at = NULL, 
+        deleted_by = NULL    -- ✅ This clears the old deleter
     WHERE id = ? AND is_deleted = 1
     LIMIT 1
   `;
