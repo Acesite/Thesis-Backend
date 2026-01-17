@@ -35,6 +35,7 @@ const farmerLoginRoutes = require("./Routes/Login/loginFarmerRoutes");
 const calamityRoutes = require("./Routes/Calamity/calamityRoutes");
 const manageCalamityRoutes = require("./Routes/Calamity/managecalamityRoutes");
 const archiveRoutes = require("./Routes/Archive/archiveRoutes");
+const calamityRadiusRoutes = require('./Routes/Calamity/calamityradiusRoutes');
 // Optional: health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -51,6 +52,7 @@ app.use("/api/farmers", farmerLoginRoutes);
 app.use("/api/calamities", calamityRoutes);
 app.use("/api/managecalamities", manageCalamityRoutes);
 app.use("/api/archive", archiveRoutes);
+app.use('/api/calamityradius', calamityRadiusRoutes);
 
 
 // ──────────────────────────────────────────────────────────
