@@ -20,19 +20,21 @@ function toLocalUploadPath(maybeUrlOrPath) {
   } catch (_) {}
 
   // Starts with /uploads/...
-  if (maybeUrlOrPath.startsWith("/uploads/")) {
+  if (typeof maybeUrlOrPath === "string" && maybeUrlOrPath.startsWith("/uploads/")) {
     const rel = maybeUrlOrPath.replace(/^\/?uploads\/?/, "");
     return path.join(UPLOAD_ROOT, rel);
   }
 
   // Bare relative like "crops/a.jpg" → put under /uploads
-  if (!path.isAbsolute(maybeUrlOrPath)) {
+  if (typeof maybeUrlOrPath === "string" && !path.isAbsolute(maybeUrlOrPath)) {
     return path.join(UPLOAD_ROOT, maybeUrlOrPath);
   }
 
   // Only allow absolute paths that are inside UPLOAD_ROOT (safety)
-  const normalized = path.normalize(maybeUrlOrPath);
-  if (normalized.startsWith(UPLOAD_ROOT)) return normalized;
+  if (typeof maybeUrlOrPath === "string") {
+    const normalized = path.normalize(maybeUrlOrPath);
+    if (normalized.startsWith(UPLOAD_ROOT)) return normalized;
+  }
 
   return null;
 }
@@ -47,7 +49,6 @@ async function removeFilesSafe(fileList = []) {
       await fsp.unlink(local);
       return { file: raw, status: "deleted" };
     } catch (err) {
-      // Ignore ENOENT; log others for debugging
       if (err.code !== "ENOENT") {
         console.warn("[deleteCrop] unlink failed:", local, err.code || err.message);
       }
@@ -57,79 +58,94 @@ async function removeFilesSafe(fileList = []) {
   return Promise.allSettled(tasks);
 }
 
+/* ===================== helpers ===================== */
+const first = (v) => (Array.isArray(v) ? v[0] : v);
+
+const pickFirstDefined = (...vals) => {
+  for (const v of vals) {
+    const x = first(v);
+    if (x !== undefined) return x;
+  }
+  return undefined;
+};
+
+const toNullableNumber = (v) => {
+  v = first(v);
+  if (v === undefined || v === null || v === "" || v === "null") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const toNullableText = (v) => {
+  v = first(v);
+  if (v === undefined || v === null || v === "" || v === "null") return null;
+  return String(v);
+};
+
+const toBoolTinyInt = (v, defaultVal = null) => {
+  v = first(v);
+  if (v === undefined || v === null || v === "") return defaultVal;
+  if (v === true || v === "true" || v === 1 || v === "1" || v === "yes") return 1;
+  return 0;
+};
+/* ================================================ */
+
+/* =============================== GET ALL CROPS =============================== */
 exports.getAllCrops = (req, res) => {
   const sql = `
     SELECT
-      /* crop */
       c.id,
+      c.farmer_id,
       c.crop_type_id,
       c.variety_id,
       c.planted_date,
       c.estimated_harvest,
       c.estimated_volume,
+      c.est_farmgate_value_display,
       c.estimated_hectares,
       c.avg_elevation_m,
       c.note,
       c.latitude,
       c.longitude,
-      c.created_at,
-      c.farmer_id,
-      c.admin_id,
+      c.coordinates,
       c.photos,
+      c.admin_id,
+
+      c.ecosystem_id,
+      c.cropping_system_id,
+      c.is_intercropped,
+      c.intercrop_id,
+      c.intercrop_variety_id,
+
       c.is_harvested,
       c.harvested_date,
 
-      /* cropping system flags (from tbl_crops) */
-      c.cropping_system_id,
-      c.is_intercropped,
+      c.is_deleted,
+      c.is_archived,
+      c.is_hidden,
+      c.deleted_at,
+      c.deleted_by,
+      c.created_at,
 
-      /* secondary crop (from tbl_crop_intercrops) */
-      ci.crop_type_id          AS intercrop_crop_type_id,
-      ci.variety_id            AS intercrop_variety_id,
-      ci.estimated_volume      AS intercrop_estimated_volume,
-      ci.cropping_system       AS intercrop_cropping_system,
-      ci.cropping_description  AS intercrop_cropping_description,
-      ct2.name                 AS intercrop_crop_name,
-      cv2.name                 AS intercrop_variety_name,
+      ct.name AS crop_name,
+      cv.name AS variety_name,
 
-      /* map barangay from farmer (since crops table has none) */
-      f.barangay               AS crop_barangay,
+      f.first_name AS farmer_first_name,
+      f.last_name AS farmer_last_name,
+      f.mobile_number AS farmer_mobile,
+      f.barangay AS farmer_barangay,
+      f.full_address AS farmer_address,
+      f.tenure_id AS farmer_tenure_id,
 
-      /* type & variety labels (primary crop) */
-      ct.name                  AS crop_name,
-      cv.name                  AS variety_name,
-
-      /* farmer details */
-      f.farmer_id              AS farmer_pk,
-      f.first_name             AS farmer_first_name,
-      f.last_name              AS farmer_last_name,
-      f.mobile_number          AS farmer_mobile,
-      f.barangay               AS farmer_barangay,
-      f.full_address           AS farmer_address,
-      f.tenure_id              AS farmer_tenure_id,
-
-      /* tenure label */
-      tt.tenure_name           AS tenure_name,
-
-      /* tagged by (admin/user who created it) */
-      u.first_name             AS tagger_first_name,
-      u.last_name              AS tagger_last_name,
-      u.email                  AS tagger_email
+      tt.tenure_name AS tenure_name
 
     FROM tbl_crops c
-    LEFT JOIN tbl_crop_types      ct  ON ct.id  = c.crop_type_id
-    LEFT JOIN tbl_crop_varieties  cv  ON cv.id  = c.variety_id
-
-    LEFT JOIN tbl_crop_intercrops ci  ON ci.crop_id = c.id
-    LEFT JOIN tbl_crop_types      ct2 ON ct2.id = ci.crop_type_id
-    LEFT JOIN tbl_crop_varieties  cv2 ON cv2.id = ci.variety_id
-
-    LEFT JOIN tbl_farmers         f   ON f.farmer_id = c.farmer_id
+    LEFT JOIN tbl_crop_types ct ON ct.id = c.crop_type_id
+    LEFT JOIN tbl_crop_varieties cv ON cv.id = c.variety_id
+    LEFT JOIN tbl_farmers f ON f.farmer_id = c.farmer_id
     LEFT JOIN tbl_land_tenure_types tt ON tt.tenure_id = f.tenure_id
-    LEFT JOIN tbl_users           u   ON u.id = c.admin_id
 
-    WHERE c.is_deleted = 0 OR c.is_deleted IS NULL   /* 🔹 FILTER OUT DELETED CROPS */
-
+    WHERE (c.is_deleted = 0 OR c.is_deleted IS NULL)
     ORDER BY c.created_at DESC
   `;
 
@@ -142,35 +158,173 @@ exports.getAllCrops = (req, res) => {
   });
 };
 
+/* =============================== GET CROP TYPES =============================== */
+exports.getCropTypes = (req, res) => {
+  const sql = `SELECT id, name FROM tbl_crop_types ORDER BY name ASC`;
+  db.query(sql, (err, rows) => {
+    if (err) {
+      console.error("getCropTypes error:", err);
+      return res.status(500).json({ success: false, message: "DB error" });
+    }
+    res.json(rows || []);
+  });
+};
 
-/* ================== UPDATE: crop record + intercrop ================== */
+/* =============================== GET CROP HISTORY BY FIELD =============================== */
+/**
+ * Frontend: GET /api/crops/:id/history
+ * "same field" = same coordinates string
+ * Includes est_farmgate_value_display so previous season shows value.
+ */
+exports.getCropHistoryByField = (req, res) => {
+  const { id } = req.params;
+
+  const findSql = `
+    SELECT id, coordinates
+    FROM tbl_crops
+    WHERE id = ?
+    LIMIT 1
+  `;
+
+  db.query(findSql, [id], (err, rows) => {
+    if (err) {
+      console.error("history find error:", err);
+      return res.status(500).json({ success: false, message: "DB error" });
+    }
+    if (!rows || !rows.length) return res.json([]);
+
+    const coords = rows[0].coordinates;
+    if (!coords) return res.json([]);
+
+    const sql = `
+      SELECT
+        c.id,
+        c.farmer_id,
+        c.crop_type_id,
+        c.variety_id,
+        c.planted_date,
+        c.estimated_harvest,
+        c.estimated_volume,
+        c.estimated_hectares,
+        c.avg_elevation_m,
+        c.note,
+        c.latitude,
+        c.longitude,
+        c.coordinates,
+        c.photos,
+        c.admin_id,
+
+        c.ecosystem_id,
+        c.cropping_system_id,
+        c.is_intercropped,
+        c.intercrop_id,
+        c.intercrop_variety_id,
+
+        c.is_harvested,
+        c.harvested_date,
+
+        c.created_at,
+
+        /* ✅ the most important field for your compare card */
+        c.est_farmgate_value_display,
+
+        ct.name AS crop_name,
+        cv.name AS variety_name
+
+      FROM tbl_crops c
+      LEFT JOIN tbl_crop_types ct ON ct.id = c.crop_type_id
+      LEFT JOIN tbl_crop_varieties cv ON cv.id = c.variety_id
+
+      WHERE (c.is_deleted = 0 OR c.is_deleted IS NULL)
+        AND c.coordinates = ?
+
+      ORDER BY COALESCE(c.planted_date, c.created_at) ASC, c.created_at ASC
+    `;
+
+    db.query(sql, [coords], (err2, rows2) => {
+      if (err2) {
+        console.error("history list error:", err2);
+        return res.status(500).json({ success: false, message: "DB error" });
+      }
+      res.json(rows2 || []);
+    });
+  });
+};
+
+/* =============================== MARK HARVESTED =============================== */
+/**
+ * Frontend: PATCH /api/crops/:id/harvest
+ * Body may contain { harvested_date: "YYYY-MM-DD" }
+ */
+exports.markHarvested = (req, res) => {
+  const { id } = req.params;
+  const harvested_date = toNullableText(req.body?.harvested_date);
+
+  const sql = `
+    UPDATE tbl_crops
+    SET is_harvested = 1,
+        harvested_date = COALESCE(?, harvested_date, CURDATE())
+    WHERE id = ?
+      AND (is_deleted = 0 OR is_deleted IS NULL)
+    LIMIT 1
+  `;
+
+  db.query(sql, [harvested_date, id], (err, result) => {
+    if (err) {
+      console.error("markHarvested error:", err);
+      return res.status(500).json({ success: false, message: "DB error" });
+    }
+    return res.json({
+      success: true,
+      affectedRows: result.affectedRows,
+      message: "Marked as harvested",
+    });
+  });
+};
+
+/* =============================== UPDATE CROP =============================== */
+/**
+ * Frontend: PATCH /api/crops/:id
+ * Supports snake_case + camelCase keys
+ */
 exports.updateCrop = (req, res) => {
   const { id } = req.params;
-  const {
-    crop_type_id,
-    variety_id,
-    planted_date,
-    estimated_harvest,
-    estimated_volume,
-    estimated_hectares,
-    note,
-    latitude,
-    longitude,
-    farmer_id, // optional switch to another farmer
+  const body = req.body || {};
 
-    is_harvested,
-  harvested_date,
-    // NEW: cropping + intercropping fields coming from the modal
-    is_intercropped,
-    cropping_system_id,
-    intercrop_crop_type_id,
-    intercrop_variety_id,
-    intercrop_estimated_volume,
-    intercrop_cropping_system,
-    intercrop_cropping_description,
-  } = req.body;
+  const farmer_id = pickFirstDefined(body.farmer_id, body.farmerId);
+  const crop_type_id = pickFirstDefined(body.crop_type_id, body.cropTypeId);
+  const variety_id = pickFirstDefined(body.variety_id, body.varietyId);
 
-  console.log("[updateCrop] id:", id, "payload:", req.body);
+  const planted_date = pickFirstDefined(body.planted_date, body.plantedDate);
+  const estimated_harvest = pickFirstDefined(body.estimated_harvest, body.estimatedHarvest);
+  const estimated_volume = pickFirstDefined(body.estimated_volume, body.estimatedVolume);
+  const estimated_hectares = pickFirstDefined(body.estimated_hectares, body.estimatedHectares);
+
+  const avg_elevation_m = pickFirstDefined(body.avg_elevation_m, body.avgElevationM);
+  const note = pickFirstDefined(body.note);
+
+  const latitude = pickFirstDefined(body.latitude);
+  const longitude = pickFirstDefined(body.longitude);
+  const coordinates = pickFirstDefined(body.coordinates);
+
+  const photos = pickFirstDefined(body.photos); // if you update images via JSON string
+
+  // crop value display (est crop value)
+  const est_farmgate_value_display = pickFirstDefined(
+    body.est_farmgate_value_display,
+    body.estFarmgateValueDisplay
+  );
+
+  // cropping system
+  const ecosystem_id = pickFirstDefined(body.ecosystem_id, body.ecosystemId);
+  const cropping_system_id = pickFirstDefined(body.cropping_system_id, body.croppingSystemId);
+  const is_intercropped = pickFirstDefined(body.is_intercropped, body.isIntercropped);
+  const intercrop_id = pickFirstDefined(body.intercrop_id, body.intercropId);
+  const intercrop_variety_id = pickFirstDefined(body.intercrop_variety_id, body.intercropVarietyId);
+
+  // harvested fields
+  const is_harvested = pickFirstDefined(body.is_harvested, body.isHarvested);
+  const harvested_date = pickFirstDefined(body.harvested_date, body.harvestedDate);
 
   const sets = [];
   const params = [];
@@ -179,217 +333,89 @@ exports.updateCrop = (req, res) => {
     params.push(val);
   };
 
-  // --- primary crop columns ---
-  if (crop_type_id !== undefined)       push("crop_type_id",       crop_type_id || null);
-  if (variety_id !== undefined)         push("variety_id",         variety_id || null);
-  if (planted_date !== undefined)       push("planted_date",       planted_date || null);
-  if (estimated_harvest !== undefined)  push("estimated_harvest",  estimated_harvest || null);
-  if (estimated_volume !== undefined)   push("estimated_volume",   estimated_volume || null);
-  if (estimated_hectares !== undefined) push("estimated_hectares", estimated_hectares || null);
-  if (note !== undefined)               push("note",               note || null);
-  if (latitude !== undefined)           push("latitude",           latitude || null);
-  if (longitude !== undefined)          push("longitude",          longitude || null);
-  if (is_harvested !== undefined)        push("is_harvested", Number(is_harvested) ? 1 : 0);
-if (harvested_date !== undefined)      push("harvested_date", harvested_date || null);
+  if (farmer_id !== undefined) push("farmer_id", toNullableNumber(farmer_id));
+  if (crop_type_id !== undefined) push("crop_type_id", toNullableNumber(crop_type_id));
+  if (variety_id !== undefined) push("variety_id", toNullableNumber(variety_id));
 
+  if (planted_date !== undefined) push("planted_date", toNullableText(planted_date));
+  if (estimated_harvest !== undefined) push("estimated_harvest", toNullableText(estimated_harvest));
+  if (estimated_volume !== undefined) push("estimated_volume", toNullableNumber(estimated_volume));
+  if (estimated_hectares !== undefined) push("estimated_hectares", toNullableNumber(estimated_hectares));
 
-  if (cropping_system_id !== undefined)
-    push("cropping_system_id", cropping_system_id || null);
+  if (avg_elevation_m !== undefined) push("avg_elevation_m", toNullableNumber(avg_elevation_m));
+  if (note !== undefined) push("note", toNullableText(note));
 
-  if (is_intercropped !== undefined)
-    push("is_intercropped", Number(is_intercropped) ? 1 : 0);
+  if (latitude !== undefined) push("latitude", toNullableNumber(latitude));
+  if (longitude !== undefined) push("longitude", toNullableNumber(longitude));
+  if (coordinates !== undefined) push("coordinates", toNullableText(coordinates));
 
-  const wantsFarmerUpdate = farmer_id !== undefined;
-  const numericFarmerId = Number(farmer_id);
+  if (photos !== undefined) push("photos", toNullableText(photos));
 
-  // --- secondary crop payload (tbl_crop_intercrops) ---
-  const wantIntercropRow =
-    Number(is_intercropped) === 1 ||
-    intercrop_crop_type_id !== undefined ||
-    intercrop_variety_id !== undefined ||
-    intercrop_estimated_volume !== undefined ||
-    intercrop_cropping_system !== undefined ||
-    intercrop_cropping_description !== undefined;
+  if (ecosystem_id !== undefined) push("ecosystem_id", toNullableNumber(ecosystem_id));
+  if (cropping_system_id !== undefined) push("cropping_system_id", toNullableNumber(cropping_system_id));
+  if (is_intercropped !== undefined) push("is_intercropped", toBoolTinyInt(is_intercropped, 0));
+  if (intercrop_id !== undefined) push("intercrop_id", toNullableNumber(intercrop_id));
+  if (intercrop_variety_id !== undefined) push("intercrop_variety_id", toNullableNumber(intercrop_variety_id));
 
-  const intercropData = {
-    crop_type_id:
-      intercrop_crop_type_id === undefined || intercrop_crop_type_id === ""
-        ? null
-        : intercrop_crop_type_id,
-    variety_id:
-      intercrop_variety_id === undefined || intercrop_variety_id === ""
-        ? null
-        : intercrop_variety_id,
-    estimated_volume:
-      intercrop_estimated_volume === undefined ||
-      intercrop_estimated_volume === ""
-        ? null
-        : intercrop_estimated_volume,
-    cropping_system:
-      intercrop_cropping_system === undefined ||
-      intercrop_cropping_system === ""
-        ? null
-        : intercrop_cropping_system,
-    cropping_description:
-      intercrop_cropping_description === undefined ||
-      intercrop_cropping_description === ""
-        ? null
-        : intercrop_cropping_description,
-  };
+  if (is_harvested !== undefined) push("is_harvested", toBoolTinyInt(is_harvested, 0));
+  if (harvested_date !== undefined) push("harvested_date", toNullableText(harvested_date));
 
-  // run UPDATE tbl_crops (or no-op if nothing to change)
-  const runCropUpdate = (cb) => {
-    if (sets.length === 0) {
-      // nothing for tbl_crops, still maybe want to update intercrop row
-      return cb(null, { affectedRows: 0, changedRows: 0 });
-    }
-
-    const sql = `
-      UPDATE tbl_crops
-      SET ${sets.join(", ")}
-      WHERE id = ?
-      LIMIT 1
-    `;
-    params.push(id);
-
-    db.query(sql, params, (err, result) => {
-      if (err) return cb(err);
-      cb(null, result);
-    });
-  };
-
-  // upsert / delete in tbl_crop_intercrops
-  const upsertIntercrop = (cb) => {
-    if (!wantIntercropRow) {
-      // remove any existing secondary crop if user unchecked intercropping
-      return db.query(
-        "DELETE FROM tbl_crop_intercrops WHERE crop_id = ?",
-        [id],
-        (err) => {
-          if (err) {
-            console.error("[updateCrop] delete intercrop error:", err);
-          }
-          cb();
-        }
-      );
-    }
-
-    // there SHOULD be some secondary data; upsert it
-    db.query(
-      "SELECT id FROM tbl_crop_intercrops WHERE crop_id = ? LIMIT 1",
-      [id],
-      (err, rows) => {
-        if (err) {
-          console.error("[updateCrop] select intercrop error:", err);
-          return cb(); // don't block main update response
-        }
-
-        // strip undefined keys
-        const clean = {};
-        Object.entries(intercropData).forEach(([k, v]) => {
-          if (v !== undefined) clean[k] = v;
-        });
-
-        if (rows && rows.length) {
-          // UPDATE existing secondary crop
-          db.query(
-            "UPDATE tbl_crop_intercrops SET ? WHERE id = ?",
-            [clean, rows[0].id],
-            (err2) => {
-              if (err2) {
-                console.error("[updateCrop] update intercrop error:", err2);
-              }
-              cb();
-            }
-          );
-        } else {
-          // INSERT new secondary crop
-          db.query(
-            "INSERT INTO tbl_crop_intercrops SET ?",
-            [{ crop_id: id, ...clean }],
-            (err2) => {
-              if (err2) {
-                console.error("[updateCrop] insert intercrop error:", err2);
-              }
-              cb();
-            }
-          );
-        }
-      }
-    );
-  };
-
-  const finish = () => {
-    runCropUpdate((err, result) => {
-      if (err) {
-        console.error("updateCrop error:", err);
-        return res.status(500).json({ success: false, message: "DB error" });
-      }
-
-      upsertIntercrop(() => {
-        return res.json({
-          success: true,
-          affectedRows: result.affectedRows,
-          changedRows: result.changedRows,
-          message: "Crop updated.",
-        });
-      });
-    });
-  };
-
-  // --- farmer linking logic stays as before ---
-  if (!wantsFarmerUpdate) {
-    return finish();
+  if (est_farmgate_value_display !== undefined) {
+    const disp = toNullableText(est_farmgate_value_display);
+    const normalized = (disp || "").replace(/\s+/g, " ").trim();
+    const looksZero =
+      normalized === "₱0" ||
+      normalized === "₱0–₱0" ||
+      normalized === "₱0 - ₱0" ||
+      normalized === "₱0 – ₱0";
+    push("est_farmgate_value_display", looksZero ? null : disp);
   }
 
-  if (!Number.isInteger(numericFarmerId) || numericFarmerId <= 0) {
-    console.log("[updateCrop] invalid farmer_id:", farmer_id);
-    return res
-      .status(400)
-      .json({ success: false, message: "Invalid farmer_id. Pick from the dropdown." });
+  if (sets.length === 0) {
+    return res.status(400).json({ success: false, message: "No fields to update" });
   }
 
-  db.query(
-    "SELECT 1 FROM tbl_farmers WHERE farmer_id = ? LIMIT 1",
-    [numericFarmerId],
-    (err, rows) => {
-      if (err) {
-        console.error("farmer lookup error:", err);
-        return res.status(500).json({ success: false, message: "DB error" });
-      }
-      if (!rows || rows.length === 0) {
-        console.log("[updateCrop] farmer not found:", numericFarmerId);
-        return res
-          .status(400)
-          .json({ success: false, message: "Farmer not found" });
-      }
-      push("farmer_id", numericFarmerId);
-      return finish();
+  const sql = `
+    UPDATE tbl_crops
+    SET ${sets.join(", ")}
+    WHERE id = ?
+      AND (is_deleted = 0 OR is_deleted IS NULL)
+    LIMIT 1
+  `;
+  params.push(id);
+
+  db.query(sql, params, (err, result) => {
+    if (err) {
+      console.error("updateCrop error:", err);
+      return res.status(500).json({ success: false, message: "DB error" });
     }
-  );
+    return res.json({
+      success: true,
+      affectedRows: result.affectedRows,
+      changedRows: result.changedRows,
+      message: "Crop updated.",
+    });
+  });
 };
 
+/* =============================== DELETE CROP (soft) =============================== */
 exports.deleteCrop = (req, res) => {
   const { id } = req.params;
 
-  // Accept from auth, header, or body
   const incomingUserId =
     (req.user && req.user.id) ||
     req.headers["x-user-id"] ||
     (req.body && req.body.deleted_by) ||
     null;
 
-  // 1) Require a valid numeric deleter id
   const deleterId = Number(incomingUserId);
   if (!Number.isInteger(deleterId) || deleterId <= 0) {
     return res.status(400).json({
       success: false,
-      message:
-        "Missing or invalid deleter id. Please include X-User-Id header or body.deleted_by.",
+      message: "Missing or invalid deleter id. Please include X-User-Id header or body.deleted_by.",
     });
   }
 
-  // 2) Optional: verify the user exists (safer audit trail)
   const verifySql = "SELECT 1 FROM tbl_users WHERE id = ? LIMIT 1";
   db.query(verifySql, [deleterId], (verifyErr, rows) => {
     if (verifyErr) {
@@ -397,13 +423,9 @@ exports.deleteCrop = (req, res) => {
       return res.status(500).json({ success: false, message: "DB error" });
     }
     if (!rows || !rows.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Deleter user not found.",
-      });
+      return res.status(400).json({ success: false, message: "Deleter user not found." });
     }
 
-    // 3) Perform soft delete with explicit deleter
     const sql = `
       UPDATE tbl_crops
       SET is_deleted = 1,
@@ -412,32 +434,32 @@ exports.deleteCrop = (req, res) => {
       WHERE id = ?
       LIMIT 1
     `;
+
     db.query(sql, [deleterId, id], (err) => {
       if (err) {
         console.error("Soft delete error:", err);
-        return res
-          .status(500)
-          .json({ success: false, message: "Error marking crop as deleted" });
+        return res.status(500).json({ success: false, message: "Error marking crop as deleted" });
       }
+
+      // If you ever want to delete files physically:
+      // const photos = JSON.parse(row.photos || "[]");
+      // await removeFilesSafe(photos);
+
       return res.json({ success: true, message: "Crop marked as deleted." });
     });
   });
 };
 
-
-
-
 /* ================== UPDATE: farmer details (name + contact + tenure) ================== */
 exports.updateFarmerName = (req, res) => {
   const { id } = req.params; // farmer_id
-  // accept the same payload your frontend sends
   const {
     first_name,
     last_name,
-    mobile: mobile_number,      // frontend key -> DB column
-    address: full_address,      // frontend key -> DB column
-    tenure_id,                  // FK to tbl_land_tenure_types.tenure_id
-  } = req.body;
+    mobile: mobile_number,
+    address: full_address,
+    tenure_id,
+  } = req.body || {};
 
   if (!id) {
     return res.status(400).json({ success: false, message: "farmer_id is required" });
@@ -445,15 +467,16 @@ exports.updateFarmerName = (req, res) => {
 
   const sets = [];
   const params = [];
-  const push = (col, val) => { sets.push(`${col} = ?`); params.push(val); };
+  const push = (col, val) => {
+    sets.push(`${col} = ?`);
+    params.push(val);
+  };
 
-  // only set what is provided (undefined → ignore, empty string → set NULL for nullable fields)
-  if (first_name !== undefined)   push("first_name",   (first_name || "").trim());
-  if (last_name  !== undefined)   push("last_name",    (last_name  || "").trim());
-  if (mobile_number !== undefined)push("mobile_number",(mobile_number || "").trim() || null);
-  if (full_address  !== undefined)push("full_address", (full_address  || "").trim() || null);
+  if (first_name !== undefined) push("first_name", (first_name || "").trim());
+  if (last_name !== undefined) push("last_name", (last_name || "").trim());
+  if (mobile_number !== undefined) push("mobile_number", (mobile_number || "").trim() || null);
+  if (full_address !== undefined) push("full_address", (full_address || "").trim() || null);
 
-  // tenure_id: allow null to clear; ensure numeric if provided
   if (tenure_id !== undefined) {
     const t = String(tenure_id).trim();
     push("tenure_id", t === "" ? null : Number(t));
@@ -484,4 +507,3 @@ exports.updateFarmerName = (req, res) => {
     });
   });
 };
-

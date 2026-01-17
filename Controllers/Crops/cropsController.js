@@ -1,23 +1,32 @@
-// Controllers/Crops/cropsController.js
+
 const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
 
 /* ---------- helpers ---------- */
+const first = (v) => (Array.isArray(v) ? v[0] : v);
+
 const toNullableInt = (v) => {
-  if (Array.isArray(v)) v = v[0]; // handle multipart duplicates
+  v = first(v);
   if (v === undefined || v === null || v === "" || v === "null") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
 
 const toNullableNumber = (v) => {
+  v = first(v);
   if (v === undefined || v === null || v === "" || v === "null") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
 
-const toBool = (v) => ["1", 1, true, "true", "yes", "on"].includes(v);
+const toNullableText = (v) => {
+  v = first(v);
+  if (v === undefined || v === null || v === "" || v === "null") return null;
+  return String(v);
+};
+
+const toBool = (v) => ["1", 1, true, "true", "yes", "on"].includes(first(v));
 
 const STANDARD_MATURITY_DAYS = {
   1: 100, // Corn
@@ -32,8 +41,7 @@ const STANDARD_MATURITY_DAYS = {
 const CROPPING_META = {
   monocrop: {
     label: "Monocrop",
-    description:
-      "Planting and managing only one crop species in a field at a time.",
+    description: "Planting and managing only one crop species in a field at a time.",
   },
   intercrop: {
     label: "Intercropped (2 crops)",
@@ -85,10 +93,10 @@ function mvFile(file, destPath) {
 }
 
 /* ===================== LIST CROPS ===================== */
-exports.getCrops = async (_req, res) => {
+exports.getCrops = async (req, res) => {
   try {
-    const include_archived = toBool(_req.query?.include_archived);
-    const only_archived = toBool(_req.query?.only_archived);
+    const include_archived = toBool(req.query?.include_archived);
+    const only_archived = toBool(req.query?.only_archived);
 
     let where = "1=1";
     if (only_archived) {
@@ -118,7 +126,7 @@ exports.getCrops = async (_req, res) => {
         ct2.name AS intercrop_crop_name,
         cv2.name AS intercrop_variety_name,
 
-        -- 🔹 tenure (tenure_id is on tbl_farmers)
+        -- tenure (tenure_id is on tbl_farmers)
         tt.tenure_id   AS tenure_id,
         tt.tenure_name AS tenure_name
 
@@ -161,7 +169,6 @@ exports.getCropById = async (req, res) => {
         f.mobile_number AS farmer_mobile,
         f.barangay AS farmer_barangay,
         f.full_address AS farmer_address,
-        -- 🔹 tenure (from farmer)
         tt.tenure_id   AS tenure_id,
         tt.tenure_name AS tenure_name
       FROM tbl_crops c
@@ -183,10 +190,10 @@ exports.getCropById = async (req, res) => {
 };
 
 /* ===================== POLYGONS FOR MAP ===================== */
-exports.getAllPolygons = async (_req, res) => {
+exports.getAllPolygons = async (req, res) => {
   try {
-    const include_archived = toBool(_req.query?.include_archived);
-    const only_archived = toBool(_req.query?.only_archived);
+    const include_archived = toBool(req.query?.include_archived);
+    const only_archived = toBool(req.query?.only_archived);
 
     let where = "c.coordinates IS NOT NULL";
     if (only_archived) {
@@ -198,7 +205,7 @@ exports.getAllPolygons = async (_req, res) => {
     const sql = `
       SELECT
         c.*,
-        ct.name AS crop_name, 
+        ct.name AS crop_name,
         cv.name AS variety_name,
         CONCAT(u.first_name, ' ', u.last_name) AS admin_name,
         f.first_name AS farmer_first_name,
@@ -215,10 +222,8 @@ exports.getAllPolygons = async (_req, res) => {
         ct2.name AS intercrop_crop_name,
         cv2.name AS intercrop_variety_name,
 
-        -- 🔹 tenure (from farmer)
         tt.tenure_name AS tenure_name,
 
-        -- 👇 NEW: “effective” harvested flag
         CASE
           WHEN c.is_harvested = 1 THEN 1
           WHEN c.estimated_harvest IS NOT NULL
@@ -241,29 +246,26 @@ exports.getAllPolygons = async (_req, res) => {
 
     const geojson = {
       type: "FeatureCollection",
-      features: rows.map((row) => ([
-        JSON.parse(row.coordinates)
-      ]).filter(Boolean).map((coords) => ({
-        type: "Feature",
-        geometry: {
-          type: "Polygon",
-          coordinates: [coords],
-        },
-        properties: {
-          id: row.id,
-          crop_name: row.crop_name,
-          variety_name: row.variety_name,
-          tenure_name: row.tenure_name,
-
-          // dates for timeline filter
-          planted_date: row.planted_date,
-          estimated_harvest: row.estimated_harvest,
-          harvested_date: row.harvested_date,
-
-          // 👇 use effective flag here
-          is_harvested: row.is_harvested_effective,
-        },
-      }))).flat(),
+      features: rows
+        .map((row) =>
+          [JSON.parse(row.coordinates)]
+            .filter(Boolean)
+            .map((coords) => ({
+              type: "Feature",
+              geometry: { type: "Polygon", coordinates: [coords] },
+              properties: {
+                id: row.id,
+                crop_name: row.crop_name,
+                variety_name: row.variety_name,
+                tenure_name: row.tenure_name,
+                planted_date: row.planted_date,
+                estimated_harvest: row.estimated_harvest,
+                harvested_date: row.harvested_date,
+                is_harvested: row.is_harvested_effective,
+              },
+            }))
+        )
+        .flat(),
     };
 
     res.json(geojson);
@@ -299,7 +301,6 @@ exports.getCropVarietiesByType = async (req, res) => {
   }
 };
 
-// ---------- get ecosystems by crop type ----------
 exports.getEcosystemsByCropType = async (req, res) => {
   try {
     const { crop_type_id } = req.params;
@@ -316,7 +317,6 @@ exports.getEcosystemsByCropType = async (req, res) => {
   }
 };
 
-// ---------- 🔹 tenure types ----------
 exports.getTenureTypes = async (_req, res) => {
   try {
     const [rows] = await db
@@ -339,7 +339,6 @@ exports.createCrop = async (req, res) => {
       variety_id,
       ecosystem_id,
 
-      // intercropping fields
       cropping_system,
       is_intercropped,
       intercrop_crop_type_id,
@@ -353,7 +352,10 @@ exports.createCrop = async (req, res) => {
       coordinates,
       admin_id,
 
-      // farmer (may be blank if anonymous)
+      // ✅ desired farmgate display string
+      est_farmgate_value_display,
+
+      // farmer
       farmer_first_name,
       farmer_last_name,
       farmer_mobile,
@@ -361,18 +363,13 @@ exports.createCrop = async (req, res) => {
       farmer_address,
       full_address,
 
-      // elevation aliases
       avg_elevation_m,
       avgElevationM,
       avgElevation,
 
-      // tenure belongs to farmer
       tenure_id,
 
-      // 🔹 NEW: privacy flag from frontend
       is_anonymous_farmer,
-
-      // 🔹 location barangay from frontend (used as fallback)
       barangay,
     } = req.body;
 
@@ -380,6 +377,8 @@ exports.createCrop = async (req, res) => {
     if (!ctId) return res.status(400).json({ message: "crop_type_id is required" });
     if (!plantedDate)
       return res.status(400).json({ message: "plantedDate is required" });
+
+    console.log("[createCrop] est_farmgate_value_display:", est_farmgate_value_display);
 
     // ---------- coords ----------
     const parsedCoords =
@@ -391,7 +390,6 @@ exports.createCrop = async (req, res) => {
     if (![lng, lat].every((n) => typeof n === "number" && isFinite(n))) {
       return res.status(400).json({ message: "Invalid coordinate pair" });
     }
-    const polygonString = JSON.stringify(parsedCoords);
 
     // ---------- compute harvest ----------
     const computedHarvest = addDaysToISO(
@@ -416,7 +414,8 @@ exports.createCrop = async (req, res) => {
           return res.status(400).json({ message: "Photo too large" });
         }
         const ext = path.extname(file.name).toLowerCase() || ".jpg";
-        const base = path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "") || "crop";
+        const base =
+          path.basename(file.name, ext).replace(/[^a-z0-9_-]/gi, "") || "crop";
         const filename = `${Date.now()}_${base}${ext}`;
         const filePath = path.join(uploadDir, filename);
         await mvFile(file, filePath);
@@ -434,7 +433,9 @@ exports.createCrop = async (req, res) => {
     const isIntercroppedFlag = toBool(is_intercropped) ? 1 : 0;
 
     // ---------- cropping system meta ----------
-    const csKey = (cropping_system || (isIntercroppedFlag ? "intercrop" : "monocrop")).toLowerCase();
+    const csKey = (
+      cropping_system || (isIntercroppedFlag ? "intercrop" : "monocrop")
+    ).toLowerCase();
     const csMeta = CROPPING_META[csKey] || null;
     const croppingSystemId = CROPPING_SYSTEM_IDS[csKey] || null;
     const croppingSystemLabel = csMeta ? csMeta.label : csKey;
@@ -451,7 +452,7 @@ exports.createCrop = async (req, res) => {
     );
     const tenureIdVal = toNullableInt(tenure_id);
 
-    // ---------- 🔹 farmer upsert (handles anonymous) ----------
+    // ---------- farmer upsert ----------
     const isAnonymous = toBool(is_anonymous_farmer);
     let farmer_id = null;
 
@@ -468,12 +469,16 @@ exports.createCrop = async (req, res) => {
       farmer_id = insAnon.insertId;
     } else {
       if (!farmer_mobile) {
-        return res.status(400).json({ message: "farmer_mobile is required (or mark anonymous)" });
+        return res
+          .status(400)
+          .json({ message: "farmer_mobile is required (or mark anonymous)" });
       }
 
       const [existing] = await db
         .promise()
-        .query("SELECT farmer_id FROM tbl_farmers WHERE mobile_number = ? LIMIT 1", [farmer_mobile]);
+        .query("SELECT farmer_id FROM tbl_farmers WHERE mobile_number = ? LIMIT 1", [
+          farmer_mobile,
+        ]);
 
       const finalAddress = full_address ?? farmer_address ?? null;
 
@@ -530,6 +535,7 @@ exports.createCrop = async (req, res) => {
         planted_date,
         estimated_harvest,
         estimated_volume,
+        est_farmgate_value_display,
         estimated_hectares,
         avg_elevation_m,
         note,
@@ -540,8 +546,9 @@ exports.createCrop = async (req, res) => {
         admin_id,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
+
     const values = [
       farmer_id,
       ctId,
@@ -552,6 +559,7 @@ exports.createCrop = async (req, res) => {
       plantedDate || null,
       computedHarvest || null,
       estVol,
+      toNullableText(est_farmgate_value_display),
       estHa,
       avgElevationMVal,
       note || null,
@@ -561,6 +569,7 @@ exports.createCrop = async (req, res) => {
       JSON.stringify(photoPaths),
       adminIdNum,
     ];
+
     const [result] = await db.promise().query(sql, values);
 
     // history
@@ -602,10 +611,13 @@ exports.createCrop = async (req, res) => {
       id: result.insertId,
       estimated_harvest: computedHarvest,
       photos: photoPaths,
+      est_farmgate_value_display: toNullableText(est_farmgate_value_display),
     });
   } catch (err) {
     console.error("Insert error:", err);
-    res.status(400).json({ message: err.sqlMessage || err.message || "Server error" });
+    res.status(400).json({
+      message: err.sqlMessage || err.message || "Server error",
+    });
   }
 };
 
@@ -613,7 +625,6 @@ exports.createCrop = async (req, res) => {
 exports.markCropHarvested = async (req, res) => {
   try {
     const { id } = req.params;
-
     const { harvested_date: bodyHarvestedDate } = req.body || {};
     let harvested_date = bodyHarvestedDate;
 
@@ -623,20 +634,18 @@ exports.markCropHarvested = async (req, res) => {
     }
 
     if (!harvested_date) {
-      harvested_date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      harvested_date = new Date().toISOString().slice(0, 10);
     }
 
-    const [result] = await db
-      .promise()
-      .query(
-        `
+    const [result] = await db.promise().query(
+      `
         UPDATE tbl_crops
            SET is_harvested = 1,
                harvested_date = ?
          WHERE id = ?
       `,
-        [harvested_date, cropId]
-      );
+      [harvested_date, cropId]
+    );
 
     await db.promise().query(
       `
@@ -668,7 +677,6 @@ exports.getCropHistory = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1) Get the current crop polygon (same polygon = same field)
     const [currentRows] = await db.promise().query(
       `SELECT coordinates FROM tbl_crops WHERE id = ? LIMIT 1`,
       [id]
@@ -678,7 +686,6 @@ exports.getCropHistory = async (req, res) => {
     }
     const polygonJson = currentRows[0].coordinates;
 
-    // archive filter (optional, mirrors your other endpoints)
     const include_archived = toBool(req.query?.include_archived);
     const only_archived = toBool(req.query?.only_archived);
     let extra = "";
@@ -688,7 +695,6 @@ exports.getCropHistory = async (req, res) => {
       extra = " AND (c.is_archived = 0 OR c.is_archived IS NULL)";
     }
 
-    // 2) Fetch past seasons sharing the same polygon, excluding this crop
     const [history] = await db.promise().query(
       `
       SELECT
@@ -707,6 +713,9 @@ exports.getCropHistory = async (req, res) => {
         c.variety_id,
         c.is_deleted,
         c.is_archived,
+
+        -- ✅ farmgate display stored in tbl_crops
+        c.est_farmgate_value_display,
 
         ct.name AS crop_name,
         cv.name AS variety_name
@@ -738,7 +747,6 @@ exports.archiveSeason = async (req, res) => {
       return res.status(400).json({ message: "Invalid crop id" });
     }
 
-    // Allow archive only if effectively harvested (explicit or by date)
     const [rows] = await db.promise().query(
       `
       SELECT is_harvested, harvested_date, estimated_harvest
@@ -751,13 +759,14 @@ exports.archiveSeason = async (req, res) => {
     if (!rows.length) return res.status(404).json({ message: "Crop not found" });
 
     const r = rows[0];
-    const today = new Date().toISOString().slice(0,10);
+    const today = new Date().toISOString().slice(0, 10);
     const effectiveHarvested =
-      r.is_harvested == 1 ||
-      (r.estimated_harvest && r.estimated_harvest <= today);
+      r.is_harvested == 1 || (r.estimated_harvest && r.estimated_harvest <= today);
 
     if (!effectiveHarvested) {
-      return res.status(400).json({ message: "Only harvested seasons can be archived" });
+      return res
+        .status(400)
+        .json({ message: "Only harvested seasons can be archived" });
     }
 
     const [upd] = await db.promise().query(
@@ -769,7 +778,9 @@ exports.archiveSeason = async (req, res) => {
     return res.json({ success: true, id: cropId, is_archived: 1 });
   } catch (err) {
     console.error("archiveSeason error:", err);
-    return res.status(500).json({ message: err.sqlMessage || err.message || "Server error" });
+    return res
+      .status(500)
+      .json({ message: err.sqlMessage || err.message || "Server error" });
   }
 };
 
@@ -788,6 +799,8 @@ exports.unarchiveSeason = async (req, res) => {
     return res.json({ success: true, id: cropId, is_archived: 0 });
   } catch (err) {
     console.error("unarchiveSeason error:", err);
-    return res.status(500).json({ message: err.sqlMessage || err.message || "Server error" });
+    return res
+      .status(500)
+      .json({ message: err.sqlMessage || err.message || "Server error" });
   }
 };
