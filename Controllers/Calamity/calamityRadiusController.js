@@ -96,10 +96,7 @@ const createCalamityRadius = (req, res) => {
   });
 };
 
-/**
- * Get all saved calamity radii
- * GET /api/calamityradius
- */
+
 const getAllCalamityRadius = (req, res) => {
   const sql = `
     SELECT
@@ -112,8 +109,12 @@ const getAllCalamityRadius = (req, res) => {
       radius_meters,
       started_at,
       ended_at,
-      admin_id
+      admin_id,
+      is_deleted,
+      deleted_at,
+      deleted_by
     FROM tbl_radius_calamities
+    WHERE is_deleted = 0
     ORDER BY started_at DESC, id DESC
   `;
 
@@ -128,18 +129,8 @@ const getAllCalamityRadius = (req, res) => {
   });
 };
 
-/**
- * Upload a damage photo for a specific crop inside a calamity radius
- * Uses express-fileupload (req.files.photo)
- *
- * POST /api/calamityradius/:id/photo
- *  - form-data:
- *      photo: (file)
- *      crop_id: number
- *      caption: string (optional)
- *      taken_at: ISO datetime string (optional)
- *      uploaded_by: user id (optional)
- */
+
+
 const addCalamityPolygonPhoto = (req, res) => {
   const calamityId = parseInt(req.params.id, 10);
   const { crop_id, caption, taken_at, uploaded_by } = req.body;
@@ -353,58 +344,44 @@ const upsertCalamityImpact = (req, res) => {
 
 const deleteCalamityRadius = (req, res) => {
   const calamityId = parseInt(req.params.id, 10);
+  const { deleted_by } = req.body; // optional, ID of admin performing the delete
 
   if (!calamityId) {
     return res.status(400).json({ message: "Invalid calamity radius id" });
   }
 
-  // 1) delete impacts
-  const deleteImpactsSql =
-    "DELETE FROM tbl_calamity_crop_impacts WHERE calamity_id = ?";
-  db.query(deleteImpactsSql, [calamityId], (err) => {
+  const deletedBy = deleted_by ? parseInt(deleted_by, 10) : null;
+
+  const sql = `
+    UPDATE tbl_radius_calamities
+    SET
+      is_deleted = 1,
+      deleted_at = CURRENT_TIMESTAMP,
+      deleted_by = ?
+    WHERE id = ? AND is_deleted = 0
+  `;
+
+  db.query(sql, [deletedBy, calamityId], (err, result) => {
     if (err) {
-      console.error("Error deleting calamity impacts:", err);
+      console.error("Error soft deleting calamity radius:", err);
       return res
         .status(500)
-        .json({ message: "Failed to delete calamity impacts" });
+        .json({ message: "Failed to delete calamity radius" });
     }
 
-    // 2) delete photos
-    const deletePhotosSql =
-      "DELETE FROM tbl_calamity_crop_photos WHERE calamity_id = ?";
-    db.query(deletePhotosSql, [calamityId], (err2) => {
-      if (err2) {
-        console.error("Error deleting calamity photos:", err2);
-        return res
-          .status(500)
-          .json({ message: "Failed to delete calamity photos" });
-      }
-
-      // 3) delete radius
-      const deleteRadiusSql =
-        "DELETE FROM tbl_radius_calamities WHERE id = ?";
-      db.query(deleteRadiusSql, [calamityId], (err3, result) => {
-        if (err3) {
-          console.error("Error deleting calamity radius:", err3);
-          return res
-            .status(500)
-            .json({ message: "Failed to delete calamity radius" });
-        }
-
-        if (!result.affectedRows) {
-          return res
-            .status(404)
-            .json({ message: "Calamity radius not found" });
-        }
-
-        return res.json({
-          message: "Calamity radius deleted",
-          id: calamityId,
-        });
+    if (!result.affectedRows) {
+      return res.status(404).json({
+        message: "Calamity radius not found or already deleted",
       });
+    }
+
+    return res.json({
+      message: "Calamity radius deleted (soft)",
+      id: calamityId,
     });
   });
 };
+
 
 const resolveCalamityImpact = (req, res) => {
   const calamityId = parseInt(req.params.id, 10);
