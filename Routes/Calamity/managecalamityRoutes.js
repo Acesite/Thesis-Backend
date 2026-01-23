@@ -1,24 +1,34 @@
+// Routes/Calamity/calamityradiusRoutes.js
 const express = require("express");
 const router = express.Router();
-const ctrl = require("../../Controllers/Calamity/managecalamityController");
+const controller = require("../../Controllers/Calamity/calamityRadiusController");
 
-// specific first
-router.get("/types", ctrl.listDistinctTypes);
-router.get("/types/distinct/all", ctrl.listDistinctTypes);
-router.get("/crop-types", ctrl.listCropTypes);
-router.get("/crop-varieties", ctrl.listCropVarieties);
-router.get("/ecosystems", ctrl.listEcosystems);
+// For file uploads
+const fileUpload = require("express-fileupload");
+router.use(fileUpload({
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  createParentPath: true
+}));
 
-// list
-router.get("/", ctrl.listCalamities);
+// ========== CALAMITY RADIUS CRUD ==========
+router.post("/", controller.createCalamityRadius);
+router.get("/", controller.getAllCalamityRadius);
+router.delete("/:id", controller.deleteCalamityRadius);
 
-// CRUD (dynamic last)
-router.get("/:id", ctrl.getCalamityById);
-router.post("/", ctrl.createCalamity);
-router.put("/:id", ctrl.updateCalamity);
-router.delete("/:id", ctrl.deleteCalamity);
+// ========== PHOTOS ==========
+router.post("/:id/photos", controller.addCalamityPolygonPhoto);
+router.get("/:id/photos", controller.getCalamityPolygonPhotos);
 
-router.get("/:id/farmers", ctrl.listCalamityFarmers);
-router.put("/:id/farmers/:farmerId", ctrl.updateCalamityFarmer);
+// ========== IMPACTS ==========
+router.post("/:id/impacts", controller.upsertCalamityImpact);
+router.post("/:id/impacts/resolve", controller.resolveCalamityImpact);
+router.get("/:id/impacts", controller.getCalamityImpactsByCalamity);
+
+// ========== HISTORY ==========
+router.get("/crop/:cropId/history", controller.getCalamityHistoryForCrop);
+
+// ========== NEW ENDPOINTS FOR FRONTEND TABLE ==========
+router.get("/test-impact-table", controller.testImpactTable);        // Test connection
+router.get("/impact-records", controller.getAllCalamityCropImpacts); // Main data for table
 
 module.exports = router;

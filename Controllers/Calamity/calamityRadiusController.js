@@ -48,7 +48,7 @@ const createCalamityRadius = (req, res) => {
     const insertSql = `
       INSERT INTO tbl_radius_calamities
         (name, type, description, center_lng, center_lat, radius_meters,
-         started_at, ended_at, admin_id)
+        started_at, ended_at, admin_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
@@ -509,6 +509,221 @@ const getCalamityImpactsByCalamity = (req, res) => {
   });
 };
 
+// ==================== NEW FUNCTIONS FOR FRONTEND TABLE ====================
+
+/**
+ * Get ALL calamity crop impact records (for the frontend table)
+ * GET /api/calamityradius/impact-records
+ */
+const getAllCalamityCropImpacts = (req, res) => {
+  console.log("Fetching all calamity crop impacts...");
+  
+  // First, check if the table exists
+  const checkTableSql = "SHOW TABLES LIKE 'tbl_calamity_crop_impacts'";
+  db.query(checkTableSql, (err, tables) => {
+    if (err) {
+      console.error("Error checking table existence:", err);
+      return res.status(500).json({ 
+        message: "Database error checking table", 
+        error: err.message 
+      });
+    }
+    
+    if (tables.length === 0) {
+      console.error("Table tbl_calamity_crop_impacts does not exist");
+      return res.status(404).json({ 
+        message: "Table tbl_calamity_crop_impacts not found",
+        suggestion: "Check if table name is correct or create the table" 
+      });
+    }
+    
+    console.log("Table exists, fetching data...");
+    
+    // Try the full query with joins first
+    const fullSql = `
+      SELECT 
+        i.*,
+        c.name AS calamity_name,
+        c.type AS calamity_type,
+        c.started_at,
+        c.ended_at,
+        c.center_lng,
+        c.center_lat,
+        c.radius_meters,
+        ct.crop_name,
+        ct.variety_name,
+        f.first_name,
+        f.last_name,
+        f.mobile_number,
+        f.barangay AS farmer_barangay
+      FROM tbl_calamity_crop_impacts i
+      LEFT JOIN tbl_radius_calamities c ON i.calamity_id = c.id AND c.is_deleted = 0
+      LEFT JOIN tbl_crop_type ct ON i.crop_id = ct.id
+      LEFT JOIN tbl_farmer f ON i.farmer_id = f.id
+      ORDER BY i.created_at DESC
+    `;
+
+    db.query(fullSql, (err, rows) => {
+      if (err) {
+        console.error("Error in full query with joins:", err);
+        console.log("Trying simpler query...");
+        
+        // If joins fail, try a simple query
+        const simpleSql = "SELECT * FROM tbl_calamity_crop_impacts ORDER BY created_at DESC";
+        db.query(simpleSql, (err2, rows2) => {
+          if (err2) {
+            console.error("Error in simple query:", err2);
+            return res.status(500).json({ 
+              message: "Failed to fetch calamity crop impacts", 
+              error: err2.message 
+            });
+          }
+          
+          console.log(`Successfully fetched ${rows2.length} records (simple query)`);
+          return res.json(rows2 || []);
+        });
+        return;
+      }
+      
+      console.log(`Successfully fetched ${rows.length} records (full query with joins)`);
+      
+      // Format the results for frontend
+      const formattedResults = (rows || []).map(row => ({
+        id: row.id,
+        calamity_id: row.calamity_id,
+        crop_id: row.crop_id,
+        farmer_id: row.farmer_id,
+        
+        // Calamity details
+        calamity_name: row.calamity_name,
+        calamity_type: row.calamity_type,
+        name: row.calamity_name || row.calamity_type,
+        started_at: row.started_at,
+        ended_at: row.ended_at,
+        center_lng: row.center_lng,
+        center_lat: row.center_lat,
+        radius_meters: row.radius_meters,
+        
+        // Crop details
+        crop_name: row.crop_name,
+        crop_type_name: row.crop_name,
+        variety_name: row.variety_name,
+        crop: row.crop_name || row.variety_name,
+        
+        // Farmer details
+        farmer_name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+        mobile_number: row.mobile_number,
+        farmer_barangay: row.farmer_barangay,
+        
+        // Impact metrics
+        severity: row.severity,
+        level: row.level,
+        distance_meters: row.distance_meters,
+        damage_fraction: row.damage_fraction,
+        damaged_area_ha: row.damaged_area_ha,
+        damaged_volume: row.damaged_volume,
+        loss_value_php: row.loss_value_php,
+        base_area_ha: row.base_area_ha,
+        base_volume: row.base_volume,
+        base_unit: row.base_unit,
+        
+        // Resolution info
+        is_resolved: row.is_resolved,
+        resolved_at: row.resolved_at,
+        resolved_by: row.resolved_by,
+        status: row.is_resolved ? 'Resolved' : 'Ongoing',
+        
+        // Timestamps
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      }));
+
+      return res.json(formattedResults);
+    });
+  });
+};
+
+/**
+ * Test endpoint to verify table structure and connectivity
+ * GET /api/calamityradius/test-impact-table
+ */
+const testImpactTable = (req, res) => {
+  console.log("Testing impact table connection...");
+  
+  // Check if table exists
+  const checkTableSql = "SHOW TABLES LIKE 'tbl_calamity_crop_impacts'";
+  db.query(checkTableSql, (err, tables) => {
+    if (err) {
+      console.error("Error checking table:", err);
+      return res.status(500).json({ 
+        success: false, 
+        message: "Database error", 
+        error: err.message 
+      });
+    }
+    
+    const tableExists = tables.length > 0;
+    
+    if (!tableExists) {
+      return res.json({
+        success: false,
+        tableExists: false,
+        message: "Table 'tbl_calamity_crop_impacts' does not exist",
+        suggestion: "Create the table or check the name"
+      });
+    }
+    
+    // Get table structure
+    const describeSql = "DESCRIBE tbl_calamity_crop_impacts";
+    db.query(describeSql, (err2, columns) => {
+      if (err2) {
+        console.error("Error describing table:", err2);
+        return res.json({
+          success: false,
+          tableExists: true,
+          message: "Table exists but cannot describe structure",
+          error: err2.message
+        });
+      }
+      
+      // Get sample data
+      const sampleSql = "SELECT * FROM tbl_calamity_crop_impacts LIMIT 5";
+      db.query(sampleSql, (err3, sampleData) => {
+        if (err3) {
+          console.error("Error fetching sample data:", err3);
+          return res.json({
+            success: false,
+            tableExists: true,
+            columns: columns.map(col => col.Field),
+            message: "Table exists but cannot fetch data",
+            error: err3.message
+          });
+        }
+        
+        // Get total count
+        const countSql = "SELECT COUNT(*) as total FROM tbl_calamity_crop_impacts";
+        db.query(countSql, (err4, countResult) => {
+          const total = countResult && countResult[0] ? countResult[0].total : 0;
+          
+          return res.json({
+            success: true,
+            tableExists: true,
+            tableName: 'tbl_calamity_crop_impacts',
+            columnCount: columns.length,
+            columns: columns.map(col => col.Field),
+            totalRecords: total,
+            sampleDataCount: sampleData.length,
+            sampleData: sampleData,
+            apiEndpoint: "/api/calamityradius/impact-records"
+          });
+        });
+      });
+    });
+  });
+};
+
+// ==================== EXPORTS ====================
+
 module.exports = {
   createCalamityRadius,
   getAllCalamityRadius,
@@ -516,7 +731,11 @@ module.exports = {
   getCalamityPolygonPhotos,
   upsertCalamityImpact,
   deleteCalamityRadius,
-   resolveCalamityImpact,
-    getCalamityHistoryForCrop,
-    getCalamityImpactsByCalamity,
+  resolveCalamityImpact,
+  getCalamityHistoryForCrop,
+  getCalamityImpactsByCalamity,
+  
+  // NEW FUNCTIONS FOR FRONTEND
+  getAllCalamityCropImpacts,    // Main endpoint for frontend table
+  testImpactTable               // Test endpoint
 };
