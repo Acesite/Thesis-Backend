@@ -435,14 +435,12 @@ const resolveCalamityImpact = (req, res) => {
   db.query(sql, [resolvedBy, calamityId, cropId], (err, result) => {
     if (err) {
       console.error("Error resolving calamity impact:", err);
-      return res
-        .status(500)
-        .json({ message: "Failed to resolve calamity impact" });
+      return res.status(500).json({ message: "Failed to resolve calamity impact" });
     }
 
     if (!result.affectedRows) {
       return res.status(404).json({
-        message: "No impact record found for this calamity and crop",
+        message: "No impact record found for this crop under this calamity.",
       });
     }
 
@@ -499,7 +497,40 @@ const getCalamityHistoryForCrop = (req, res) => {
   });
 };
 
+const getCalamityImpactsByCalamity = (req, res) => {
+  const calamityId = parseInt(req.params.id, 10);
+  if (!calamityId) {
+    return res.status(400).json({ message: "Invalid calamity radius id" });
+  }
 
+  const sql = `
+    SELECT
+      id,
+      calamity_id,
+      crop_id,
+      severity,
+      level,
+      is_resolved,
+      resolved_at,
+      resolved_by,
+      damaged_area_ha,
+      damaged_volume,
+      loss_value_php,
+      updated_at,
+      created_at
+    FROM tbl_calamity_crop_impacts
+    WHERE calamity_id = ?
+    ORDER BY updated_at DESC, id DESC
+  `;
+
+  db.query(sql, [calamityId], (err, rows) => {
+    if (err) {
+      console.error("Error fetching calamity impacts:", err);
+      return res.status(500).json({ message: "Failed to fetch calamity impacts" });
+    }
+    return res.json(rows || []);
+  });
+};
 
 module.exports = {
   createCalamityRadius,
@@ -510,4 +541,5 @@ module.exports = {
   deleteCalamityRadius,
    resolveCalamityImpact,
     getCalamityHistoryForCrop,
+    getCalamityImpactsByCalamity,
 };
