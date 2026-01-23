@@ -19,12 +19,12 @@ function toLocalUploadPath(maybeUrlOrPath) {
     }
   } catch (_) {}
 
-  if (maybeUrlOrPath.startsWith("/uploads/")) {
+  if (typeof maybeUrlOrPath === "string" && maybeUrlOrPath.startsWith("/uploads/")) {
     const rel = maybeUrlOrPath.replace(/^\/?uploads\/?/, "");
     return path.join(UPLOAD_ROOT, rel);
   }
 
-  if (!path.isAbsolute(maybeUrlOrPath)) {
+  if (typeof maybeUrlOrPath === "string" && !path.isAbsolute(maybeUrlOrPath)) {
     return path.join(UPLOAD_ROOT, maybeUrlOrPath);
   }
 
@@ -35,9 +35,11 @@ function toLocalUploadPath(maybeUrlOrPath) {
 
 async function removeFilesSafe(fileList = []) {
   const uniq = Array.from(new Set(fileList)).filter(Boolean);
+
   const tasks = uniq.map(async (raw) => {
     const local = toLocalUploadPath(raw);
     if (!local) return { file: raw, status: "skipped" };
+
     try {
       await fsp.unlink(local);
       return { file: raw, status: "deleted" };
@@ -48,34 +50,35 @@ async function removeFilesSafe(fileList = []) {
       return { file: raw, status: "not_found_or_error" };
     }
   });
+
   return Promise.allSettled(tasks);
 }
 
 /** GET /api/archive/crops – list archived crop items (soft-deleted). */
 exports.getArchivedCrops = (req, res) => {
   const sql = `
-  SELECT
-    c.id,
-    c.deleted_at,
-    c.deleted_by,
-    ct.name AS crop_name,
-    cv.name AS variety_name,
-    f.first_name AS farmer_first_name,
-    f.last_name  AS farmer_last_name,
-    f.barangay   AS farmer_barangay,
-    du.first_name AS deleter_first_name,
-    du.last_name  AS deleter_last_name,
-    du.email      AS deleter_email
-  FROM tbl_crops c
-  LEFT JOIN tbl_crop_types ct     ON ct.id = c.crop_type_id
-  LEFT JOIN tbl_crop_varieties cv ON cv.id = c.variety_id
-  LEFT JOIN tbl_farmers f         ON f.farmer_id = c.farmer_id
-  /* >>> pick ONE of these based on your schema <<< */
-  LEFT JOIN tbl_users du          ON du.id = c.deleted_by
-  -- LEFT JOIN tbl_users du       ON du.user_id = c.deleted_by
-  WHERE c.is_deleted = 1
-  ORDER BY c.deleted_at DESC
-`;
+    SELECT
+      c.id,
+      c.deleted_at,
+      c.deleted_by,
+      c.photos,
+      c.note,
+      ct.name AS crop_name,
+      cv.name AS variety_name,
+      f.first_name AS farmer_first_name,
+      f.last_name  AS farmer_last_name,
+      f.barangay   AS farmer_barangay,
+      du.first_name AS deleter_first_name,
+      du.last_name  AS deleter_last_name,
+      du.email      AS deleter_email
+    FROM tbl_crops c
+    LEFT JOIN tbl_crop_types ct     ON ct.id = c.crop_type_id
+    LEFT JOIN tbl_crop_varieties cv ON cv.id = c.variety_id
+    LEFT JOIN tbl_farmers f         ON f.farmer_id = c.farmer_id
+    LEFT JOIN tbl_users du          ON du.id = c.deleted_by
+    WHERE c.is_deleted = 1
+    ORDER BY c.deleted_at DESC
+  `;
 
   db.query(sql, (err, rows) => {
     if (err) {
@@ -84,26 +87,32 @@ exports.getArchivedCrops = (req, res) => {
     }
 
     const items = (rows || []).map((r) => {
-      const owner = [r.farmer_first_name, r.farmer_last_name].filter(Boolean).join(" ").trim();
+      const owner = [r.farmer_first_name, r.farmer_last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+
       const archivedBy =
-  (r.deleter_first_name || r.deleter_last_name)
-    ? `${r.deleter_first_name || ""} ${r.deleter_last_name || ""}`.trim()
-    : r.deleter_email || null;
+        r.deleter_first_name || r.deleter_last_name
+          ? `${r.deleter_first_name || ""} ${r.deleter_last_name || ""}`.trim()
+          : r.deleter_email || null;
 
       return {
-        // Shape expected by your AdminArchive table
         id: `C-${String(r.id).padStart(6, "0")}`,
-        rawId: r.id,                              // keep numeric id for actions
-        title: `Crop Entry – ${r.crop_name || "Unknown"}${r.variety_name ? ` (${r.variety_name})` : ""}`,
+        rawId: r.id,
+        title: `Crop Entry – ${r.crop_name || "Unknown"}${
+          r.variety_name ? ` (${r.variety_name})` : ""
+        }`,
         module: "Crops",
         owner: owner || "—",
         barangay: r.farmer_barangay || "—",
         tags: ["Crop", r.crop_name].filter(Boolean),
         archivedAt: r.deleted_at,
         archivedBy: archivedBy || "—",
-        reason: "Deleted from Crop Management",   // optional; adjust if you store reasons
+        reason: "Deleted from Crop Management",
         status: "Archived",
-        // keep for delete-forever cleanup:
+
+        // used by delete forever cleanup
         _photos: r.photos,
         _note: r.note,
       };
@@ -115,33 +124,48 @@ exports.getArchivedCrops = (req, res) => {
 
 /** POST /api/archive/crops/:id/restore – undo soft delete. */
 exports.restoreCrop = (req, res) => {
-  const { id } = req.params;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ success: false, message: "Invalid crop id." });
+  }
+
   const sql = `
     UPDATE tbl_crops
-    SET is_deleted = 0, 
-        deleted_at = NULL, 
-        deleted_by = NULL    -- ✅ This clears the old deleter
+    SET is_deleted = 0,
+        deleted_at = NULL,
+        deleted_by = NULL
     WHERE id = ? AND is_deleted = 1
     LIMIT 1
   `;
+
   db.query(sql, [id], (err, result) => {
     if (err) {
       console.error("restoreCrop error:", err);
       return res.status(500).json({ success: false, message: "DB error" });
     }
+
     if (!result.affectedRows) {
-      return res.status(404).json({ success: false, message: "Not found or not archived" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Not found or not archived" });
     }
+
     res.json({ success: true, message: "Crop restored." });
   });
 };
 
-/** DELETE /api/archive/crops/:id – hard delete + unlink intercrops + delete files. */
+/**
+ * DELETE /api/archive/crops/:id – hard delete crop
+ * FIX: delete tbl_crop_history first (FK), then intercrops, then crop.
+ */
 exports.deleteCropForever = (req, res) => {
-  const { id } = req.params;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ success: false, message: "Invalid crop id." });
+  }
 
-  // fetch row (to know photos) then delete
-  db.query("SELECT photos FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (err, rows) => {
+  // Fetch photos first (for cleanup after delete)
+  db.query("SELECT photos FROM tbl_crops WHERE id = ? LIMIT 1", [id], (err, rows) => {
     if (err) {
       console.error("select crop before hard delete error:", err);
       return res.status(500).json({ success: false, message: "DB error" });
@@ -153,28 +177,70 @@ exports.deleteCropForever = (req, res) => {
     let photoList = [];
     try {
       const raw = rows[0].photos;
-      if (raw) {
-        if (Array.isArray(raw)) photoList = raw;
-        else photoList = JSON.parse(raw);
-      }
+      if (raw) photoList = Array.isArray(raw) ? raw : JSON.parse(raw);
     } catch (_) {}
 
-    // Delete dependent rows first
-    db.query("DELETE FROM tbl_crop_intercrops WHERE crop_id = ?", [id], (e1) => {
-      if (e1) console.warn("delete intercrops error:", e1);
+    // Begin transaction for safety
+    db.beginTransaction((txErr) => {
+      if (txErr) {
+        console.error("beginTransaction error:", txErr);
+        return res.status(500).json({ success: false, message: "DB error" });
+      }
 
-      db.query("DELETE FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (e2, result) => {
-        if (e2) {
-          console.error("hard delete crop error:", e2);
-          return res.status(500).json({ success: false, message: "DB error" });
+      // 1) DELETE HISTORY FIRST (FK constraint)
+      db.query("DELETE FROM tbl_crop_history WHERE crop_id = ?", [id], (e0) => {
+        if (e0) {
+          console.error("delete crop history error:", e0);
+          return db.rollback(() =>
+            res.status(500).json({ success: false, message: "DB error" })
+          );
         }
 
-        // best-effort remove files
-        try {
-          await removeFilesSafe(photoList);
-        } catch (_) {}
+        // 2) delete intercrops link rows (safe even if none)
+        db.query("DELETE FROM tbl_crop_intercrops WHERE crop_id = ?", [id], (e1) => {
+          if (e1) {
+            console.error("delete intercrops error:", e1);
+            return db.rollback(() =>
+              res.status(500).json({ success: false, message: "DB error" })
+            );
+          }
 
-        res.json({ success: true, message: "Crop permanently deleted." });
+          // 3) delete the crop last
+          db.query("DELETE FROM tbl_crops WHERE id = ? LIMIT 1", [id], async (e2, result) => {
+            if (e2) {
+              console.error("hard delete crop error:", e2);
+
+              return db.rollback(() => {
+                // FK-friendly response if still referenced somewhere else
+                if (e2.code === "ER_ROW_IS_REFERENCED_2") {
+                  return res.status(409).json({
+                    success: false,
+                    message:
+                      "Cannot delete crop permanently because it is still referenced by other records.",
+                    error: e2.code,
+                  });
+                }
+                return res.status(500).json({ success: false, message: "DB error" });
+              });
+            }
+
+            db.commit(async (cErr) => {
+              if (cErr) {
+                console.error("commit error:", cErr);
+                return db.rollback(() =>
+                  res.status(500).json({ success: false, message: "DB error" })
+                );
+              }
+
+              // Remove files after commit (best effort)
+              try {
+                await removeFilesSafe(photoList);
+              } catch (_) {}
+
+              return res.json({ success: true, message: "Crop permanently deleted." });
+            });
+          });
+        });
       });
     });
   });
