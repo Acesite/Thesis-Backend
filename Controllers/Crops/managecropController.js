@@ -94,38 +94,7 @@ const toBoolTinyInt = (v, defaultVal = null) => {
 exports.getAllCrops = (req, res) => {
   const sql = `
     SELECT
-      c.id,
-      c.farmer_id,
-      c.crop_type_id,
-      c.variety_id,
-      c.planted_date,
-      c.estimated_harvest,
-      c.estimated_volume,
-      c.est_farmgate_value_display,
-      c.estimated_hectares,
-      c.avg_elevation_m,
-      c.note,
-      c.latitude,
-      c.longitude,
-      c.coordinates,
-      c.photos,
-      c.admin_id,
-
-      c.ecosystem_id,
-      c.cropping_system_id,
-      c.is_intercropped,
-      c.intercrop_id,
-      c.intercrop_variety_id,
-
-      c.is_harvested,
-      c.harvested_date,
-
-      c.is_deleted,
-      c.is_archived,
-      c.is_hidden,
-      c.deleted_at,
-      c.deleted_by,
-      c.created_at,
+      c.*,
 
       ct.name AS crop_name,
       cv.name AS variety_name,
@@ -137,13 +106,27 @@ exports.getAllCrops = (req, res) => {
       f.full_address AS farmer_address,
       f.tenure_id AS farmer_tenure_id,
 
-      tt.tenure_name AS tenure_name
+      tt.tenure_name AS tenure_name,
+
+      u.first_name AS tagger_first_name,
+      u.last_name  AS tagger_last_name,
+      u.email      AS tagger_email,
+
+      /* since tbl_crops has no crop_barangay column */
+      f.barangay AS crop_barangay
 
     FROM tbl_crops c
     LEFT JOIN tbl_crop_types ct ON ct.id = c.crop_type_id
     LEFT JOIN tbl_crop_varieties cv ON cv.id = c.variety_id
+
+    /* farmer join */
     LEFT JOIN tbl_farmers f ON f.farmer_id = c.farmer_id
+
+    /* tenure name */
     LEFT JOIN tbl_land_tenure_types tt ON tt.tenure_id = f.tenure_id
+
+    /* tagged by */
+    LEFT JOIN tbl_users u ON u.id = c.admin_id
 
     WHERE (c.is_deleted = 0 OR c.is_deleted IS NULL)
     ORDER BY c.created_at DESC
@@ -157,6 +140,8 @@ exports.getAllCrops = (req, res) => {
     res.json(rows || []);
   });
 };
+
+
 
 /* =============================== GET CROP TYPES =============================== */
 exports.getCropTypes = (req, res) => {
