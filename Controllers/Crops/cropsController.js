@@ -1,4 +1,3 @@
-
 const db = require("../../Config/db");
 const path = require("path");
 const fs = require("fs");
@@ -147,12 +146,14 @@ exports.getCrops = async (req, res) => {
     `;
 
     const [rows] = await db.promise().query(sql);
+    // est_farmgate_value_display is already inside c.* so it is included
     res.status(200).json(rows);
   } catch (err) {
     console.error("getCrops error:", err);
     res.status(500).json({ error: "Database error" });
   }
 };
+
 
 /* ===================== CROP BY ID ===================== */
 exports.getCropById = async (req, res) => {
@@ -182,12 +183,14 @@ exports.getCropById = async (req, res) => {
     `;
     const [rows] = await db.promise().query(sql, [id]);
     if (!rows.length) return res.status(404).json({ message: "Crop not found" });
+    // rows[0] already has est_farmgate_value_display from c.*
     res.status(200).json(rows[0]);
   } catch (err) {
     console.error("getCropById error:", err);
     res.status(500).json({ error: "Database error" });
   }
 };
+
 
 /* ===================== POLYGONS FOR MAP ===================== */
 exports.getAllPolygons = async (req, res) => {
@@ -262,6 +265,9 @@ exports.getAllPolygons = async (req, res) => {
                 estimated_harvest: row.estimated_harvest,
                 harvested_date: row.harvested_date,
                 is_harvested: row.is_harvested_effective,
+
+                // ✅ farmgate display only
+                est_farmgate_value_display: row.est_farmgate_value_display,
               },
             }))
         )
@@ -274,6 +280,7 @@ exports.getAllPolygons = async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 };
+
 
 /* ===================== TAXONOMIES ===================== */
 exports.getCropTypes = async (_req, res) => {
@@ -352,7 +359,7 @@ exports.createCrop = async (req, res) => {
       coordinates,
       admin_id,
 
-      // ✅ desired farmgate display string
+      // ✅ only this string is saved in DB
       est_farmgate_value_display,
 
       // farmer
@@ -621,6 +628,7 @@ exports.createCrop = async (req, res) => {
   }
 };
 
+
 /* ===================== MARK CROP AS HARVESTED ===================== */
 exports.markCropHarvested = async (req, res) => {
   try {
@@ -714,7 +722,7 @@ exports.getCropHistory = async (req, res) => {
         c.is_deleted,
         c.is_archived,
 
-        -- ✅ farmgate display stored in tbl_crops
+        -- ✅ only this from tbl_crops
         c.est_farmgate_value_display,
 
         ct.name AS crop_name,
@@ -738,6 +746,7 @@ exports.getCropHistory = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 /* ===================== ARCHIVE A HARVESTED SEASON ===================== */
 exports.archiveSeason = async (req, res) => {
