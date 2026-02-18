@@ -37,6 +37,7 @@ const manageCalamityRoutes = require("./Routes/Calamity/managecalamityRoutes");
 const archiveRoutes = require("./Routes/Archive/archiveRoutes");
 const calamityRadiusRoutes = require("./Routes/Calamity/calamityradiusRoutes");
 const manageImpactRoutes = require("./Routes/Calamity/manageimpactRoutes"); // ✅ impacts
+const darRoutes = require("./Routes/Dar/DarRoutes");
 
 // Optional: health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -63,11 +64,10 @@ app.use("/api/managecalamities", manageCalamityRoutes);
 app.use("/api/archive", archiveRoutes);
 app.use("/api/calamityradius", calamityRadiusRoutes);
 
-app.use("/api/impacts", manageImpactRoutes); // ✅ IMPORTANT
+app.use("/api/impacts", manageImpactRoutes); 
+app.use("/api/dar", darRoutes);
 
-// ──────────────────────────────────────────────────────────
-// 3) Serve the React build from the sibling folder
-// ──────────────────────────────────────────────────────────
+
 const clientBuild = path.join(__dirname, "..", "THESIS-FRONTEND", "build");
 
 // Serve static assets from React build
