@@ -1,4 +1,23 @@
 const db = require("../../Config/db");
+
+// ✅ NEW: helper to compute age from birth_date
+function calculateAge(birthDate) {
+  if (!birthDate) return null;
+
+  const d = new Date(birthDate);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const m = today.getMonth() - d.getMonth();
+
+  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) {
+    age--;
+  }
+
+  return age;
+}
+
 function mapArb(row) {
   return {
     arb_id: row.arb_id,
@@ -7,6 +26,10 @@ function mapArb(row) {
     last_name: row.last_name,
     extension_name: row.extension_name,
     birth_date: row.birth_date,
+
+    // ✅ NEW: computed age field
+    age: calculateAge(row.birth_date),
+
     civil_status: row.civil_status,
     household_size: row.household_size,
     years_tilling: row.years_tilling,
