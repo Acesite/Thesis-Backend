@@ -38,6 +38,7 @@ const archiveRoutes = require("./Routes/Archive/archiveRoutes");
 const calamityRadiusRoutes = require("./Routes/Calamity/calamityradiusRoutes");
 const manageImpactRoutes = require("./Routes/Calamity/manageimpactRoutes"); // ✅ impacts
 const darRoutes = require("./Routes/Dar/DarRoutes");
+const votersRoutes = require("./Routes/Voters/voterRoutes");
 
 // Optional: health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -66,6 +67,7 @@ app.use("/api/calamityradius", calamityRadiusRoutes);
 
 app.use("/api/impacts", manageImpactRoutes); 
 app.use("/api/dar", darRoutes);
+app.use("/api/voters", votersRoutes);
 
 
 const clientBuild = path.join(__dirname, "..", "THESIS-FRONTEND", "build");
