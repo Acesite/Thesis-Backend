@@ -13,5 +13,6 @@ router.get("/households/:id", votersController.getHouseholdById);
 router.post("/households", votersController.createHousehold);
 router.put("/households/:id", votersController.updateHousehold);
 router.delete("/households/:id", votersController.deleteHousehold);
+router.get("/candidates", votersController.getCandidates);
 
 module.exports = router;

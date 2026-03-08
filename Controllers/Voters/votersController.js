@@ -1,7 +1,4 @@
-// Controllers/Voters/votersController.js
 const db = require("../../Config/db");
-
-/* ---------- Helper functions ---------- */
 
 function toInt(v, def = 0) {
   const n = Number(v);
@@ -13,19 +10,15 @@ function toFloat(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function validateCounts(payload) {
-  const eligible = toInt(payload.eligible_voters, 0);
-  const yes = toInt(payload.voting_for_us, 0);
-  const undecided = toInt(payload.undecided, 0);
-  const no = toInt(payload.not_supporting, 0);
+function toGender(v) {
+  const s = String(v || "").trim().toLowerCase();
+  return s === "male" || s === "female" ? s : null;
+}
 
-  if (eligible < 0 || yes < 0 || undecided < 0 || no < 0) {
-    return "Counts cannot be negative.";
-  }
-  if (yes + undecided + no > eligible) {
-    return "voting_for_us + undecided + not_supporting must be <= eligible_voters.";
-  }
-  return null;
+function toVisited(v, def = 1) {
+  if (v === undefined || v === null || v === "") return def;
+  const n = Number(v);
+  return n === 1 ? 1 : 0;
 }
 
 function mapHousehold(row) {
@@ -33,37 +26,31 @@ function mapHousehold(row) {
     id: row.id,
     barangay_id: row.barangay_id,
     barangay_name: row.barangay_name || null,
-
     precinct_id: row.precinct_id,
     precinct_no: row.precinct_no || null,
     clustered_precinct_no: row.clustered_precinct_no || null,
     polling_place: row.polling_place || null,
-
     purok: row.purok,
     sitio: row.sitio,
-
     lat: row.lat,
     lng: row.lng,
-
-    eligible_voters: row.eligible_voters,
-    voting_for_us: row.voting_for_us,
-    undecided: row.undecided,
-    not_supporting: row.not_supporting,
-
+    family_leader_name: row.family_leader_name || null,
+    family_leader_age: row.family_leader_age,
+    family_leader_gender: row.family_leader_gender || null,
+    voter_count: row.voter_count || 0,
+    mayor_candidate_id: row.mayor_candidate_id || null,
+    vice_mayor_candidate_id: row.vice_mayor_candidate_id || null,
+    mayor_vote: row.mayor_vote || null,
+    vice_mayor_vote: row.vice_mayor_vote || null,
     notes: row.notes,
-
+    is_visited: Number(row.is_visited) === 1 ? 1 : 0,
     encoded_by: row.encoded_by,
     updated_by: row.updated_by,
-
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
-/* =========================================================
-   BARANGAYS
-   GET /api/voters/barangays
-========================================================= */
 exports.getBarangays = (req, res) => {
   const sql = `
     SELECT id, region_name, province_name, city_municipality_name, barangay_name
@@ -80,10 +67,6 @@ exports.getBarangays = (req, res) => {
   });
 };
 
-/* =========================================================
-   PRECINCTS
-   GET /api/voters/precincts?barangay_id=#
-========================================================= */
 exports.getPrecincts = (req, res) => {
   const barangayId = toInt(req.query.barangay_id, 0);
   if (!barangayId) return res.json([]);
@@ -104,10 +87,31 @@ exports.getPrecincts = (req, res) => {
   });
 };
 
-/* =========================================================
-   HOUSEHOLDS
-   GET /api/voters/households
-========================================================= */
+exports.getCandidates = (req, res) => {
+  const year = Number(req.query.year);
+
+  let sql = `
+    SELECT id, position, full_name, party, election_year
+    FROM tbl_candidates
+  `;
+  const params = [];
+
+  if (Number.isFinite(year) && year > 0) {
+    sql += ` WHERE election_year = ?`;
+    params.push(year);
+  }
+
+  sql += ` ORDER BY position ASC, full_name ASC`;
+
+  db.query(sql, params, (err, rows) => {
+    if (err) {
+      console.error("Error fetching candidates:", err);
+      return res.status(500).json({ message: "Failed to fetch candidates" });
+    }
+    res.json(rows);
+  });
+};
+
 exports.getAllHouseholds = (req, res) => {
   const sql = `
     SELECT
@@ -115,10 +119,14 @@ exports.getAllHouseholds = (req, res) => {
       b.barangay_name,
       p.precinct_no,
       p.clustered_precinct_no,
-      p.polling_place
+      p.polling_place,
+      mc.full_name AS mayor_vote,
+      vmc.full_name AS vice_mayor_vote
     FROM tbl_households h
     JOIN tbl_barangays_voters b ON b.id = h.barangay_id
     LEFT JOIN tbl_precincts p ON p.id = h.precinct_id
+    LEFT JOIN tbl_candidates mc ON mc.id = h.mayor_candidate_id
+    LEFT JOIN tbl_candidates vmc ON vmc.id = h.vice_mayor_candidate_id
     ORDER BY h.id DESC
   `;
 
@@ -131,10 +139,6 @@ exports.getAllHouseholds = (req, res) => {
   });
 };
 
-/* =========================================================
-   GET SINGLE
-   GET /api/voters/households/:id
-========================================================= */
 exports.getHouseholdById = (req, res) => {
   const { id } = req.params;
 
@@ -144,10 +148,14 @@ exports.getHouseholdById = (req, res) => {
       b.barangay_name,
       p.precinct_no,
       p.clustered_precinct_no,
-      p.polling_place
+      p.polling_place,
+      mc.full_name AS mayor_vote,
+      vmc.full_name AS vice_mayor_vote
     FROM tbl_households h
     JOIN tbl_barangays_voters b ON b.id = h.barangay_id
     LEFT JOIN tbl_precincts p ON p.id = h.precinct_id
+    LEFT JOIN tbl_candidates mc ON mc.id = h.mayor_candidate_id
+    LEFT JOIN tbl_candidates vmc ON vmc.id = h.vice_mayor_candidate_id
     WHERE h.id = ?
   `;
 
@@ -156,20 +164,32 @@ exports.getHouseholdById = (req, res) => {
       console.error("Error fetching household:", err);
       return res.status(500).json({ message: "Failed to fetch household" });
     }
-    if (rows.length === 0) {
+
+    if (!rows.length) {
       return res.status(404).json({ message: "Household not found" });
     }
-    res.json(mapHousehold(rows[0]));
+
+    const household = mapHousehold(rows[0]);
+
+    const memberSql = `
+      SELECT id, household_id, age, gender, is_family_leader, created_at
+      FROM tbl_household_members
+      WHERE household_id = ?
+      ORDER BY is_family_leader DESC, id ASC
+    `;
+
+    db.query(memberSql, [id], (memberErr, memberRows) => {
+      if (memberErr) {
+        console.error("Error fetching household members:", memberErr);
+        return res.status(500).json({ message: "Failed to fetch household members" });
+      }
+
+      household.members = memberRows || [];
+      res.json(household);
+    });
   });
 };
 
-/* ---------- helper: resolve precinct id safely ---------- */
-/**
- * Given a raw precinct_id from the request, decide what to store:
- * - if empty / null / undefined -> NULL
- * - if numeric and exists in tbl_precincts -> that id
- * - otherwise -> NULL (ignore, to avoid FK error)
- */
 function resolvePrecinctId(rawPrecinctValue, cb) {
   if (
     rawPrecinctValue === "" ||
@@ -187,18 +207,11 @@ function resolvePrecinctId(rawPrecinctValue, cb) {
   const sql = "SELECT id FROM tbl_precincts WHERE id = ? LIMIT 1";
   db.query(sql, [candidate], (err, rows) => {
     if (err) return cb(err);
-    if (!rows || rows.length === 0) {
-      // no such precinct -> treat as no precinct linked
-      return cb(null, null);
-    }
+    if (!rows || !rows.length) return cb(null, null);
     cb(null, candidate);
   });
 }
 
-/* =========================================================
-   CREATE
-   POST /api/voters/households
-========================================================= */
 exports.createHousehold = (req, res) => {
   const {
     barangay_id,
@@ -207,41 +220,73 @@ exports.createHousehold = (req, res) => {
     sitio,
     lat,
     lng,
-    eligible_voters,
-    voting_for_us,
-    undecided,
-    not_supporting,
+    family_leader_name,
+    family_leader_age,
+    family_leader_gender,
+    voter_count,
+    mayor_candidate_id,
+    vice_mayor_candidate_id,
     notes,
-
-    // temp if no auth middleware yet
     encoded_by,
+    is_visited,
+    other_members = [],
   } = req.body;
 
   const barangayId = toInt(barangay_id, 0);
   const latitude = toFloat(lat);
   const longitude = toFloat(lng);
+  const leaderAge = toInt(family_leader_age, -1);
+  const leaderGender = toGender(family_leader_gender);
+  const voterCount = toInt(voter_count, 0);
+  const mayorCandidateId = mayor_candidate_id ? toInt(mayor_candidate_id, 0) : null;
+  const viceMayorCandidateId = vice_mayor_candidate_id
+    ? toInt(vice_mayor_candidate_id, 0)
+    : null;
+  const userId = toInt(encoded_by, 0);
+  const isVisited = toVisited(is_visited, 1);
 
-  if (!barangayId)
+  if (!barangayId) {
     return res.status(400).json({ message: "barangay_id is required" });
+  }
+
   if (latitude === null || longitude === null) {
     return res.status(400).json({ message: "Valid lat and lng are required" });
   }
 
-  const countErr = validateCounts({
-    eligible_voters,
-    voting_for_us,
-    undecided,
-    not_supporting,
-  });
-  if (countErr) return res.status(400).json({ message: countErr });
+  if (leaderAge < 0) {
+    return res.status(400).json({ message: "family_leader_age is required" });
+  }
 
-  const userId = toInt(encoded_by, 0);
-  if (!userId)
-    return res
-      .status(400)
-      .json({ message: "encoded_by (user id) is required" });
+  if (!leaderGender) {
+    return res.status(400).json({ message: "family_leader_gender is required" });
+  }
 
-  // 1) Resolve precinctId first, then insert
+  if (voterCount < 1) {
+    return res.status(400).json({ message: "voter_count must be 1 or greater" });
+  }
+
+  if (!userId) {
+    return res.status(400).json({ message: "encoded_by (user id) is required" });
+  }
+
+  const normalizedMembers = Array.isArray(other_members)
+    ? other_members
+        .map((m) => ({
+          age: toInt(m?.age, -1),
+          gender: toGender(m?.gender),
+        }))
+        .filter((m) => m.age >= 0 && m.gender)
+    : [];
+
+  if (normalizedMembers.length !== Math.max(0, voterCount - 1)) {
+    return res.status(400).json({
+      message: `Please provide exactly ${Math.max(
+        0,
+        voterCount - 1
+      )} other household member age(s) and gender(s).`,
+    });
+  }
+
   resolvePrecinctId(precinct_id, (err, precinctId) => {
     if (err) {
       console.error("Error checking precinct:", err);
@@ -255,52 +300,71 @@ exports.createHousehold = (req, res) => {
         precinct_id,
         purok,
         sitio,
+        family_leader_name,
+        family_leader_age,
+        family_leader_gender,
         lat,
         lng,
-        eligible_voters,
-        voting_for_us,
-        undecided,
-        not_supporting,
         notes,
-        encoded_by
+        voter_count,
+        mayor_candidate_id,
+        vice_mayor_candidate_id,
+        encoded_by,
+        is_visited
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
       barangayId,
-      precinctId, // either valid FK or NULL
+      precinctId,
       purok || null,
       sitio || null,
+      family_leader_name || null,
+      leaderAge,
+      leaderGender,
       latitude,
       longitude,
-      toInt(eligible_voters, 0),
-      toInt(voting_for_us, 0),
-      toInt(undecided, 0),
-      toInt(not_supporting, 0),
       notes || null,
+      voterCount,
+      mayorCandidateId || null,
+      viceMayorCandidateId || null,
       userId,
+      isVisited,
     ];
 
     db.query(sql, values, (err2, result) => {
       if (err2) {
         console.error("Error creating household:", err2);
-        return res
-          .status(500)
-          .json({ message: "Failed to create household" });
+        return res.status(500).json({ message: "Failed to create household" });
       }
 
-      const insertedId = result.insertId;
-      exports.getHouseholdById({ params: { id: insertedId } }, res);
+      const householdId = result.insertId;
+
+      const memberValues = [
+        [householdId, leaderAge, leaderGender, 1],
+        ...normalizedMembers.map((m) => [householdId, m.age, m.gender, 0]),
+      ];
+
+      const memberSql = `
+        INSERT INTO tbl_household_members (household_id, age, gender, is_family_leader)
+        VALUES ?
+      `;
+
+      db.query(memberSql, [memberValues], (err3) => {
+        if (err3) {
+          console.error("Error creating household members:", err3);
+          return res.status(500).json({
+            message: "Household saved but failed to save household members",
+          });
+        }
+
+        exports.getHouseholdById({ params: { id: householdId } }, res);
+      });
     });
   });
 };
 
-/* =========================================================
-   UPDATE
-   PUT /api/voters/households/:id
-   - also writes visit history into tbl_household_visits
-========================================================= */
 exports.updateHousehold = (req, res) => {
   const { id } = req.params;
 
@@ -309,35 +373,67 @@ exports.updateHousehold = (req, res) => {
     precinct_id,
     purok,
     sitio,
-    eligible_voters,
-    voting_for_us,
-    undecided,
-    not_supporting,
+    family_leader_name,
+    family_leader_age,
+    family_leader_gender,
+    voter_count,
+    mayor_candidate_id,
+    vice_mayor_candidate_id,
     notes,
-
-    // temp if no auth middleware yet
     updated_by,
+    is_visited,
+    other_members = [],
   } = req.body;
 
-  const countErr = validateCounts({
-    eligible_voters,
-    voting_for_us,
-    undecided,
-    not_supporting,
-  });
-  if (countErr) return res.status(400).json({ message: countErr });
-
   const barangayId = toInt(barangay_id, 0);
-  if (!barangayId)
-    return res.status(400).json({ message: "barangay_id is required" });
-
+  const leaderAge = toInt(family_leader_age, -1);
+  const leaderGender = toGender(family_leader_gender);
+  const voterCount = toInt(voter_count, 0);
+  const mayorCandidateId = mayor_candidate_id ? toInt(mayor_candidate_id, 0) : null;
+  const viceMayorCandidateId = vice_mayor_candidate_id
+    ? toInt(vice_mayor_candidate_id, 0)
+    : null;
   const userId = toInt(updated_by, 0);
-  if (!userId)
-    return res
-      .status(400)
-      .json({ message: "updated_by (user id) is required" });
+  const isVisited = toVisited(is_visited, 1);
 
-  // 1) Resolve precinctId first
+  if (!barangayId) {
+    return res.status(400).json({ message: "barangay_id is required" });
+  }
+
+  if (leaderAge < 0) {
+    return res.status(400).json({ message: "family_leader_age is required" });
+  }
+
+  if (!leaderGender) {
+    return res.status(400).json({ message: "family_leader_gender is required" });
+  }
+
+  if (voterCount < 1) {
+    return res.status(400).json({ message: "voter_count must be 1 or greater" });
+  }
+
+  if (!userId) {
+    return res.status(400).json({ message: "updated_by (user id) is required" });
+  }
+
+  const normalizedMembers = Array.isArray(other_members)
+    ? other_members
+        .map((m) => ({
+          age: toInt(m?.age, -1),
+          gender: toGender(m?.gender),
+        }))
+        .filter((m) => m.age >= 0 && m.gender)
+    : [];
+
+  if (normalizedMembers.length !== Math.max(0, voterCount - 1)) {
+    return res.status(400).json({
+      message: `Please provide exactly ${Math.max(
+        0,
+        voterCount - 1
+      )} other household member age(s) and gender(s).`,
+    });
+  }
+
   resolvePrecinctId(precinct_id, (err, precinctId) => {
     if (err) {
       console.error("Error checking precinct:", err);
@@ -351,25 +447,31 @@ exports.updateHousehold = (req, res) => {
         precinct_id = ?,
         purok = ?,
         sitio = ?,
-        eligible_voters = ?,
-        voting_for_us = ?,
-        undecided = ?,
-        not_supporting = ?,
+        family_leader_name = ?,
+        family_leader_age = ?,
+        family_leader_gender = ?,
+        voter_count = ?,
+        mayor_candidate_id = ?,
+        vice_mayor_candidate_id = ?,
         notes = ?,
+        is_visited = ?,
         updated_by = ?
       WHERE id = ?
     `;
 
     const values = [
       barangayId,
-      precinctId, // valid FK or NULL
+      precinctId,
       purok || null,
       sitio || null,
-      toInt(eligible_voters, 0),
-      toInt(voting_for_us, 0),
-      toInt(undecided, 0),
-      toInt(not_supporting, 0),
+      family_leader_name || null,
+      leaderAge,
+      leaderGender,
+      voterCount,
+      mayorCandidateId || null,
+      viceMayorCandidateId || null,
       notes || null,
+      isVisited,
       userId,
       id,
     ];
@@ -377,50 +479,44 @@ exports.updateHousehold = (req, res) => {
     db.query(sql, values, (err2, result) => {
       if (err2) {
         console.error("Error updating household:", err2);
-        return res
-          .status(500)
-          .json({ message: "Failed to update household" });
+        return res.status(500).json({ message: "Failed to update household" });
       }
 
-      if (result.affectedRows === 0) {
+      if (!result.affectedRows) {
         return res.status(404).json({ message: "Household not found" });
       }
 
-      // log visit history (non-blocking)
-      const visitSql = `
-        INSERT INTO tbl_household_visits
-        (household_id, officer_id, eligible_voters, voting_for_us, undecided, not_supporting, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `;
-      const visitValues = [
-        id,
-        userId,
-        toInt(eligible_voters, 0),
-        toInt(voting_for_us, 0),
-        toInt(undecided, 0),
-        toInt(not_supporting, 0),
-        notes || null,
-      ];
+      const deleteMembersSql = `DELETE FROM tbl_household_members WHERE household_id = ?`;
 
-      db.query(visitSql, visitValues, (err3) => {
+      db.query(deleteMembersSql, [id], (err3) => {
         if (err3) {
-          console.error(
-            "Warning: failed to insert household visit history:",
-            err3
-          );
-          // don't block response
+          console.error("Error deleting old household members:", err3);
+          return res.status(500).json({ message: "Failed to update household members" });
         }
 
-        exports.getHouseholdById({ params: { id } }, res);
+        const memberValues = [
+          [Number(id), leaderAge, leaderGender, 1],
+          ...normalizedMembers.map((m) => [Number(id), m.age, m.gender, 0]),
+        ];
+
+        const memberSql = `
+          INSERT INTO tbl_household_members (household_id, age, gender, is_family_leader)
+          VALUES ?
+        `;
+
+        db.query(memberSql, [memberValues], (err4) => {
+          if (err4) {
+            console.error("Error saving updated household members:", err4);
+            return res.status(500).json({ message: "Failed to update household members" });
+          }
+
+          exports.getHouseholdById({ params: { id } }, res);
+        });
       });
     });
   });
 };
 
-/* =========================================================
-   DELETE
-   DELETE /api/voters/households/:id
-========================================================= */
 exports.deleteHousehold = (req, res) => {
   const { id } = req.params;
 
@@ -432,7 +528,7 @@ exports.deleteHousehold = (req, res) => {
       return res.status(500).json({ message: "Failed to delete household" });
     }
 
-    if (result.affectedRows === 0) {
+    if (!result.affectedRows) {
       return res.status(404).json({ message: "Household not found" });
     }
 
