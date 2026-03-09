@@ -39,44 +39,34 @@ const calamityRadiusRoutes = require("./Routes/Calamity/calamityradiusRoutes");
 const manageImpactRoutes = require("./Routes/Calamity/manageimpactRoutes"); // ✅ impacts
 const darRoutes = require("./Routes/Dar/DarRoutes");
 const votersRoutes = require("./Routes/Voters/voterRoutes");
+const managevoterRoutes = require("./Routes/Voters/managevoterRoutes");
 
 // Optional: health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// ──────────────────────────────────────────────────────────
-// 2.1) Mount routers
-// ──────────────────────────────────────────────────────────f
 app.use("/", userRoutes);
 app.use("/users", loginRoutes);
 app.use("/manageaccount", manageAccountRoutes);
-
 app.use("/api/crops", cropsRoutes);
 app.use("/api/managecrops", manageCropRoutes);
 app.use("/api", manageProfileRoutes);
-
 app.use("/api/graphs", graphRoutes);
-
 app.use("/api/farmers", farmersProfileRoutes);
 app.use("/api/farmers", farmerLoginRoutes);
-
 app.use("/api/calamities", calamityRoutes);
 app.use("/api/managecalamities", manageCalamityRoutes);
-
 app.use("/api/archive", archiveRoutes);
 app.use("/api/calamityradius", calamityRadiusRoutes);
-
 app.use("/api/impacts", manageImpactRoutes); 
 app.use("/api/dar", darRoutes);
 app.use("/api/voters", votersRoutes);
-
+app.use("/api/managevoters", managevoterRoutes);
 
 const clientBuild = path.join(__dirname, "..", "THESIS-FRONTEND", "build");
 
-// Serve static assets from React build
+
 app.use(express.static(clientBuild));
 
-// ✅ SPA fallback: ONLY ONE fallback (do NOT duplicate)
-// Any non-API route returns index.html
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api")) {
     return res.status(404).json({ error: "Not found" });
@@ -84,17 +74,11 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(clientBuild, "index.html"));
 });
 
-// ──────────────────────────────────────────────────────────
-// 4) Error handler
-// ──────────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error(err.stack);
   res.status(500).json({ error: "Internal Server Error" });
 });
 
-// ──────────────────────────────────────────────────────────
-// 5) Start
-// ──────────────────────────────────────────────────────────
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

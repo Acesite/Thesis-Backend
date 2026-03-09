@@ -534,4 +534,4 @@ exports.deleteHousehold = (req, res) => {
 
     res.json({ message: "Household deleted successfully" });
   });
-};
+};;
