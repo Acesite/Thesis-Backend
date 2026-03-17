@@ -1,10 +1,4 @@
 const db = require("../../Config/db");
-
-
-/* =========================================
-   DASHBOARD STATS
-========================================= */
-
 exports.getDashboardStats = (req, res) => {
   db.query(
     `SELECT COUNT(DISTINCT barangay_id) AS total FROM tbl_households`,
@@ -46,10 +40,6 @@ exports.getDashboardStats = (req, res) => {
 };
 
 
-/* =========================================
-   BARANGAY ANALYTICS
-========================================= */
-
 exports.getBarangayAnalytics = (req, res) => {
 
   const sql = `
@@ -75,10 +65,6 @@ exports.getBarangayAnalytics = (req, res) => {
   });
 };
 
-
-/* =========================================
-   QUICK INSIGHTS
-========================================= */
 
 exports.getQuickInsights = (req, res) => {
 
@@ -130,11 +116,6 @@ exports.getQuickInsights = (req, res) => {
   });
 };
 
-
-/* =========================================
-   RECENT ACTIVITY
-========================================= */
-
 exports.getRecentActivity = (req, res) => {
 
   const sql = `
@@ -162,16 +143,11 @@ exports.getRecentActivity = (req, res) => {
   });
 };
 
-
-/* =========================================
-   CANDIDATE CRUD
-========================================= */
-
 // GET candidates
 exports.getCandidates = (req, res) => {
 
   const sql = `
-    SELECT id, full_name, position, party, election_year
+    SELECT id, full_name, position, party, election_year, color
     FROM tbl_candidates
     ORDER BY election_year DESC, position ASC
   `;
@@ -190,17 +166,17 @@ exports.getCandidates = (req, res) => {
 // CREATE candidate
 exports.createCandidate = (req, res) => {
 
-  const { full_name, position, party, election_year } = req.body;
+  const { full_name, position, party, election_year, color } = req.body;
 
   const sql = `
     INSERT INTO tbl_candidates
-    (full_name, position, party, election_year)
-    VALUES (?, ?, ?, ?)
+    (full_name, position, party, election_year, color)
+    VALUES (?, ?, ?, ?, ?)
   `;
 
   db.query(
     sql,
-    [full_name, position, party, election_year],
+    [full_name, position, party, election_year, color || "#10b981"],
     (err, result) => {
 
       if (err) {
@@ -221,17 +197,17 @@ exports.createCandidate = (req, res) => {
 exports.updateCandidate = (req, res) => {
 
   const { id } = req.params;
-  const { full_name, position, party, election_year } = req.body;
+  const { full_name, position, party, election_year, color } = req.body;
 
   const sql = `
     UPDATE tbl_candidates
-    SET full_name=?, position=?, party=?, election_year=?
+    SET full_name=?, position=?, party=?, election_year=?, color=?
     WHERE id=?
   `;
 
   db.query(
     sql,
-    [full_name, position, party, election_year, id],
+    [full_name, position, party, election_year, color || "#10b981", id],
     (err) => {
 
       if (err) {
