@@ -7,29 +7,34 @@ const {
   getQuickInsights,
   getRecentActivity,
 
+  // ✅ new endpoints
+  getVoteStandings,
+  getGenderBreakdown,
+  getAgeBreakdown,
+  getVisitProgress,
+
   getCandidates,
   createCandidate,
   updateCandidate,
-  deleteCandidate
-
+  deleteCandidate,
 } = require("../../Controllers/Voters/managevoterController");
 
-("/test", (req, res) => {
-  res.json({
-    ok: true,
-    message: "voters route works"
-  });
-});
-
-router.get("/dashboard-stats", getDashboardStats);
+// Existing routes
+router.get("/dashboard-stats",    getDashboardStats);
 router.get("/barangay-analytics", getBarangayAnalytics);
-router.get("/quick-insights", getQuickInsights);
-router.get("/recent-activity", getRecentActivity);
+router.get("/quick-insights",     getQuickInsights);
+router.get("/recent-activity",    getRecentActivity);
 
-router.get("/candidates", getCandidates);
-router.post("/candidates", createCandidate);
-router.put("/candidates/:id", updateCandidate);
-router.delete("/candidates/:id", deleteCandidate);
+// ✅ New routes
+router.get("/vote-standings",     getVoteStandings);
+router.get("/gender-breakdown",   getGenderBreakdown);
+router.get("/age-breakdown",      getAgeBreakdown);
+router.get("/visit-progress",     getVisitProgress);
 
+// Candidates CRUD
+router.get("/candidates",         getCandidates);
+router.post("/candidates",        createCandidate);
+router.put("/candidates/:id",     updateCandidate);
+router.delete("/candidates/:id",  deleteCandidate);
 
 module.exports = router;

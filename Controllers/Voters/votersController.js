@@ -31,6 +31,7 @@ function mapHousehold(row) {
     clustered_precinct_no: row.clustered_precinct_no || null,
     polling_place: row.polling_place || null,
     purok: row.purok,
+    purok_leader_name: row.purok_leader_name || null, // ✅ new field
     sitio: row.sitio,
     lat: row.lat,
     lng: row.lng,
@@ -87,7 +88,6 @@ exports.getPrecincts = (req, res) => {
   });
 };
 
-// ✅ Added color column to SELECT
 exports.getCandidates = (req, res) => {
   const year = Number(req.query.year);
 
@@ -218,6 +218,7 @@ exports.createHousehold = (req, res) => {
     barangay_id,
     precinct_id,
     purok,
+    purok_leader_name, // ✅ new field
     sitio,
     lat,
     lng,
@@ -300,6 +301,7 @@ exports.createHousehold = (req, res) => {
         barangay_id,
         precinct_id,
         purok,
+        purok_leader_name,
         sitio,
         family_leader_name,
         family_leader_age,
@@ -313,13 +315,14 @@ exports.createHousehold = (req, res) => {
         encoded_by,
         is_visited
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
       barangayId,
       precinctId,
       purok || null,
+      purok_leader_name || null, // ✅ new field
       sitio || null,
       family_leader_name || null,
       leaderAge,
@@ -373,6 +376,7 @@ exports.updateHousehold = (req, res) => {
     barangay_id,
     precinct_id,
     purok,
+    purok_leader_name, // ✅ new field
     sitio,
     family_leader_name,
     family_leader_age,
@@ -447,6 +451,7 @@ exports.updateHousehold = (req, res) => {
         barangay_id = ?,
         precinct_id = ?,
         purok = ?,
+        purok_leader_name = ?,
         sitio = ?,
         family_leader_name = ?,
         family_leader_age = ?,
@@ -464,6 +469,7 @@ exports.updateHousehold = (req, res) => {
       barangayId,
       precinctId,
       purok || null,
+      purok_leader_name || null, // ✅ new field
       sitio || null,
       family_leader_name || null,
       leaderAge,
