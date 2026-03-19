@@ -87,11 +87,12 @@ exports.getPrecincts = (req, res) => {
   });
 };
 
+// ✅ Added color column to SELECT
 exports.getCandidates = (req, res) => {
   const year = Number(req.query.year);
 
   let sql = `
-    SELECT id, position, full_name, party, election_year
+    SELECT id, position, full_name, party, color, election_year
     FROM tbl_candidates
   `;
   const params = [];
@@ -534,4 +535,4 @@ exports.deleteHousehold = (req, res) => {
 
     res.json({ message: "Household deleted successfully" });
   });
-};;
+};
